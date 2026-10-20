@@ -1,11 +1,24 @@
 
-local URL = "https://raw.githubusercontent.com/SEU-USUARIO/MayckScript/main/MayckScript.lua"
+local URL = "https://raw.githubusercontent.com/Mayckdeep/MayckScript/main/Mayck%20Script.txt"
 
-local source = game:HttpGet(URL)
-local run = loadstring(source)
+local success, source = pcall(function()
+    return game:HttpGet(URL)
+end)
 
-if run then
-    run()
-else
-    warn("Mayck Script: falha ao carregar.")
+if not success then
+    warn("Mayck Script: erro ao baixar o código:", source)
+    return
+end
+
+local run, err = loadstring(source)
+
+if not run then
+    warn("Mayck Script: erro no código:", err)
+    return
+end
+
+local ok, result = pcall(run)
+
+if not ok then
+    warn("Mayck Script: erro ao executar:", result)
 end
