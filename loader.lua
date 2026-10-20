@@ -6,19 +6,19 @@ local success, source = pcall(function()
 end)
 
 if not success then
-    warn("Mayck Script: erro ao baixar o código:", source)
+    warn("Erro ao baixar Mayck Script:", source)
     return
 end
 
-local run, err = loadstring(source)
+local execute, err = loadstring(source)
 
-if not run then
-    warn("Mayck Script: erro no código:", err)
+if not execute then
+    warn("Erro no código:", err)
     return
 end
 
-local ok, result = pcall(run)
+local ok, result = pcall(execute)
 
 if not ok then
-    warn("Mayck Script: erro ao executar:", result)
+    warn("Erro ao executar Mayck Script:", result)
 end
