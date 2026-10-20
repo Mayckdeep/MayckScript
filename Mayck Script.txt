@@ -1,0 +1,3267 @@
+--[[
+    MAYCK SCRIPT v6.2 | PARK HERO CLEAN SHUTDOWN
+    Roblox Studio / Luau - LocalScript (StarterPlayer > StarterPlayerScripts)
+
+    Painel local para experiências que permitem estas ações.
+    Algumas ações podem ser recusadas ou revertidas pela lógica do servidor.
+    Preferências são mantidas nesta sessão (salvamento entre sessões requer servidor/DataStore).
+    Atalhos padrão: E (painel), RightShift/Insert configuráveis.
+    Freecam (PC): botão direito + mouse para olhar, WASD para mover, Q/Ctrl para altura.
+    Fly (PC): WASD para mover, Espaço para subir, Ctrl para descer.
+    No celular: use o direcional do jogo + botões SUBIR/DESCER para Fly.
+    v5.0: layout sidebar/mobile, avatares oficiais na lista e botão M corrigido.
+    Recursos herdados: botão M móvel (mouse/toque), Dash, BunnyHop,
+    Walk on Water (experimental), Click TP, ESP Box/Skeleton, Radar 2D,
+    perfis temporários, V4.waypoints, RGB e performance.
+    Voice: carregadores Mois7 e Sayrox85 OPCIONAIS, com confirmação manual.
+    Scripts remotos podem conter telemetria e não são executáveis no Studio padrão.
+    Nenhum LocalScript remove suspensão de voz aplicada pela plataforma.
+
+    Estrutura do projeto:
+    Este arquivo funciona sozinho como LocalScript. Na edição do pacote,
+    os scripts numerados em "fontes/" são blocos concatenados pelo build.py.
+    Eles compartilham variáveis locais; NÃO são ModuleScripts isolados.
+]]
+
+-- SERVIÇOS -----------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser")
+local VoiceChatService = game:GetService("VoiceChatService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
+
+local Me = Players.LocalPlayer
+local PlayerGui = Me:WaitForChild("PlayerGui")
+local GUI_NAME = "MayckScriptV54"
+-- Se um Park Hero antigo ficou órfão, destrua sua GUI; o evento Destroying
+-- do motor antigo deve soltar as teclas e desconectar Heartbeat/atalhos.
+local orphanPark = game:GetService("CoreGui"):FindFirstChild("MayckParkHeroIntegratedEngine")
+if orphanPark then pcall(function() orphanPark:Destroy() end) end
+-- Desliga as GUIs anteriores antes de instalar a versão nova.
+for _,name in ipairs({"MayckScriptV2","MayckScriptV3","MayckScriptV4","MayckScriptV5","MayckScriptV52","MayckScriptV53",GUI_NAME}) do
+    local previous=PlayerGui:FindFirstChild(name)
+    if previous then previous:Destroy() end
+end
+
+local UI = {} -- registro de controles e estados para evitar o limite de locais do Luau
+local V4={} -- recursos, estado e referências da versão 4.0
+local destroyed = false
+local connections = {}
+local watchedPlayers = {}
+local espObjects = {}
+local themeBindings = {}
+local notifications = {}
+local toggles = {}
+local settings = {
+    ESP = false, ESPName = true, ESPDistance = true, ESPHealth = true,
+    ESPTeamFilter = false, ESPLines = true,
+    MaxDistance = 2500, Speed = false, SpeedValue = 50,
+    AutoSprint = false, SprintValue = 28,
+    Fly = false, FlySpeed = 65, Noclip = false,
+    JumpBoost = false, JumpPower = 75, ESPColor = "Tema",
+    InfiniteJump = false, AntiVoid = false, AntiAFK = false,
+    Freecam = false, FreecamSpeed = 55,
+    CameraFOV = (Workspace.CurrentCamera and Workspace.CurrentCamera.FieldOfView) or 70,
+    Compact = false, Hotkey = Enum.KeyCode.E,
+    Theme = "Midnight",
+    Dash = false, DashStrength = 90, DashHotkey = Enum.KeyCode.Q,
+    BunnyHop = false, WalkOnWater = false, ClickTP = false,
+    FlySmooth = true, FlyResponsiveness = 9,
+    SprintOnMove = false,
+    ESPBox = false, ESPSkeleton = false, ESPColorR = 70, ESPColorG = 210, ESPColorB = 255,
+    Radar = false, RadarRange = 300, PlayerJoinAlerts = true,
+    Performance = false, PanelTransparency = 0, LockFloat = false,
+}
+
+local THEMES = {
+    Midnight = { BG = Color3.fromRGB(10, 13, 25), PANEL = Color3.fromRGB(18, 23, 41),
+        CARD = Color3.fromRGB(25, 32, 53), BORDER = Color3.fromRGB(52, 64, 96),
+        ACCENT = Color3.fromRGB(60, 215, 255), ACCENT2 = Color3.fromRGB(153, 112, 255),
+        TEXT = Color3.fromRGB(237, 242, 255), MUTED = Color3.fromRGB(155, 168, 194),
+        GOOD = Color3.fromRGB(62, 231, 168), BAD = Color3.fromRGB(250, 102, 124) },
+    Emerald = { BG = Color3.fromRGB(8, 23, 24), PANEL = Color3.fromRGB(16, 36, 37),
+        CARD = Color3.fromRGB(23, 48, 47), BORDER = Color3.fromRGB(55, 91, 84),
+        ACCENT = Color3.fromRGB(70, 245, 178), ACCENT2 = Color3.fromRGB(75, 210, 224),
+        TEXT = Color3.fromRGB(239, 255, 249), MUTED = Color3.fromRGB(160, 192, 183),
+        GOOD = Color3.fromRGB(81, 242, 156), BAD = Color3.fromRGB(255, 116, 136) },
+    Sunset = { BG = Color3.fromRGB(28, 16, 32), PANEL = Color3.fromRGB(42, 25, 45),
+        CARD = Color3.fromRGB(56, 34, 54), BORDER = Color3.fromRGB(96, 63, 90),
+        ACCENT = Color3.fromRGB(255, 170, 92), ACCENT2 = Color3.fromRGB(255, 98, 168),
+        TEXT = Color3.fromRGB(255, 241, 242), MUTED = Color3.fromRGB(207, 175, 193),
+        GOOD = Color3.fromRGB(104, 232, 168), BAD = Color3.fromRGB(255, 108, 124) },
+    Aurora = { BG = Color3.fromRGB(10, 21, 32), PANEL = Color3.fromRGB(19, 31, 45),
+        CARD = Color3.fromRGB(25, 43, 57), BORDER = Color3.fromRGB(61, 88, 112),
+        ACCENT = Color3.fromRGB(71, 243, 222), ACCENT2 = Color3.fromRGB(138, 132, 255),
+        TEXT = Color3.fromRGB(241, 248, 255), MUTED = Color3.fromRGB(156, 185, 204),
+        GOOD = Color3.fromRGB(79, 234, 174), BAD = Color3.fromRGB(250, 105, 124) },
+    Crimson = { BG = Color3.fromRGB(25, 12, 19), PANEL = Color3.fromRGB(41, 19, 30),
+        CARD = Color3.fromRGB(57, 28, 43), BORDER = Color3.fromRGB(99, 55, 71),
+        ACCENT = Color3.fromRGB(255, 100, 134), ACCENT2 = Color3.fromRGB(255, 180, 106),
+        TEXT = Color3.fromRGB(255, 240, 246), MUTED = Color3.fromRGB(203, 163, 182),
+        GOOD = Color3.fromRGB(111, 231, 170), BAD = Color3.fromRGB(245, 70, 98) },
+}
+-- Guarda o FOV original para devolvê-lo ao desativar/destruir o painel.
+local initialFOV = settings.CameraFOV
+local C = THEMES[settings.Theme]
+
+local function connect(signal, handler)
+    local c = signal:Connect(handler)
+    table.insert(connections, c)
+    return c
+end
+local function new(className, props, parent)
+    local o = Instance.new(className)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(parent, radius)
+    return new("UICorner", {CornerRadius = UDim.new(0, radius or 10)}, parent)
+end
+local function stroke(parent, color, transparency)
+    return new("UIStroke", {Color = color or C.BORDER, Thickness = 1,
+        Transparency = transparency or 0}, parent)
+end
+local function bindTheme(object, propertyName, token)
+    object[propertyName] = C[token]
+    table.insert(themeBindings, {object = object, propertyName = propertyName, token = token})
+end
+local function applyTheme(name)
+    if not THEMES[name] then return end
+    settings.Theme = name
+    C = THEMES[name]
+    for _, entry in ipairs(themeBindings) do
+        if entry.object.Parent then
+            pcall(function() entry.object[entry.propertyName] = C[entry.token] end)
+        end
+    end
+end
+local function tween(object, seconds, properties, style, direction)
+    if destroyed or not object or not object.Parent then return end
+    local tw = TweenService:Create(object, TweenInfo.new(seconds or 0.18,
+        style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), properties)
+    tw:Play()
+    return tw
+end
+local function textLabel(parent, value, size, bold, colorToken)
+    local t = new("TextLabel", { BackgroundTransparency = 1, Text = value,
+        Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextSize = size or 12, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd, TextWrapped = false }, parent)
+    bindTheme(t, "TextColor3", colorToken or "TEXT")
+    return t
+end
+local function basicButton(parent, title, width)
+    local b = new("TextButton", {Size = UDim2.fromOffset(width or 96, 34),
+        Text = title, Font = Enum.Font.GothamBold, TextSize = 11,
+        AutoButtonColor = false, BorderSizePixel = 0}, parent)
+    bindTheme(b, "BackgroundColor3", "CARD")
+    bindTheme(b, "TextColor3", "TEXT")
+    corner(b, 9)
+    local s = stroke(b)
+    bindTheme(s, "Color", "BORDER")
+    b.MouseEnter:Connect(function() if not destroyed then tween(b, 0.12, {BackgroundTransparency = 0.2}) end end)
+    b.MouseLeave:Connect(function() if not destroyed then tween(b, 0.12, {BackgroundTransparency = 0}) end end)
+    return b
+end
+
+-- GUI PRINCIPAL ------------------------------------------------------
+local Gui = new("ScreenGui", {Name = GUI_NAME, ResetOnSpawn = false,
+    IgnoreGuiInset = true, DisplayOrder = 80, ZIndexBehavior = Enum.ZIndexBehavior.Sibling}, PlayerGui)
+UI.Overlay = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0,0,0),
+    BackgroundTransparency = 0.64, BorderSizePixel = 0, Visible = false}, Gui)
+local Root = new("Frame", {Name = "Dashboard", AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(780, 535),
+    BorderSizePixel = 0, Visible = false, Active = true, ClipsDescendants = true}, Gui)
+bindTheme(Root, "BackgroundColor3", "PANEL")
+corner(Root, 17)
+UI.rootStroke = stroke(Root)
+bindTheme(UI.rootStroke, "Color", "BORDER")
+local RootScale = new("UIScale", {Scale = 0.95}, Root)
+
+UI.backdrop = new("Frame", {Size = UDim2.new(1, 0, 0, 76), BorderSizePixel = 0}, Root)
+bindTheme(UI.backdrop, "BackgroundColor3", "BG")
+new("UIGradient", {Rotation = 0, Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.27)})}, UI.backdrop)
+
+UI.AccentLine = new("Frame", {Size = UDim2.new(1, 0, 0, 3), BorderSizePixel = 0}, Root)
+bindTheme(UI.AccentLine, "BackgroundColor3", "ACCENT")
+UI.logoTile = new("Frame", {Size = UDim2.fromOffset(46,46), Position = UDim2.fromOffset(17,15),
+    BorderSizePixel = 0}, Root)
+bindTheme(UI.logoTile, "BackgroundColor3", "ACCENT")
+corner(UI.logoTile, 13)
+UI.logo = textLabel(UI.logoTile, "M", 27, true, "BG")
+UI.logo.Size = UDim2.fromScale(1, 1)
+UI.logo.TextXAlignment = Enum.TextXAlignment.Center
+UI.logo.TextYAlignment = Enum.TextYAlignment.Center
+UI.head = textLabel(Root, "MAYCK SCRIPT", 21, true)
+UI.head.Position = UDim2.fromOffset(75,16)
+UI.head.Size = UDim2.fromOffset(255,26)
+UI.tagline = textLabel(Root, "V6.0  •  PARK HERO FLUTUANTE", 10, false, "MUTED")
+UI.tagline.Position = UDim2.fromOffset(76,43)
+UI.tagline.Size = UDim2.fromOffset(275,16)
+UI.minimizeBtn = basicButton(Root, "—", 34)
+UI.minimizeBtn.AnchorPoint = Vector2.new(1,0)
+UI.minimizeBtn.Position = UDim2.new(1,-62,0,21)
+UI.closeBtn = basicButton(Root, "×", 34)
+UI.closeBtn.AnchorPoint = Vector2.new(1,0)
+UI.closeBtn.Position = UDim2.new(1,-19,0,21)
+-- Novo layout: menu lateral permanente no desktop; abas horizontais no celular.
+UI.sidebarBackdrop = new("Frame", {Name="SidebarBackdrop",Position=UDim2.fromOffset(12,86),
+    Size=UDim2.new(0,168,1,-137),BorderSizePixel=0},Root)
+bindTheme(UI.sidebarBackdrop,"BackgroundColor3","BG")
+corner(UI.sidebarBackdrop,12)
+UI.TabsBar = new("ScrollingFrame", {Position=UDim2.fromOffset(18,123),
+    Size=UDim2.new(0,156,1,-185), BackgroundTransparency=1,
+    ScrollBarThickness=2, ScrollingDirection=Enum.ScrollingDirection.Y,
+    AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(0,0,0,0)},Root)
+UI.TabsLayout = new("UIListLayout", {FillDirection=Enum.FillDirection.Vertical,
+    HorizontalAlignment=Enum.HorizontalAlignment.Center,
+    VerticalAlignment=Enum.VerticalAlignment.Top,
+    Padding=UDim.new(0,7)},UI.TabsBar)
+UI.sidebarTitle =textLabel(Root,"NAVEGAÇÃO",10,true,"MUTED")
+UI.sidebarTitle.Position=UDim2.fromOffset(29,98)
+UI.sidebarTitle.Size=UDim2.fromOffset(133,18)
+UI.TAB_NAMES ={"Jogadores","Movimento","Visual","Radar","Utilidades","ParkHero","Voz","Config"}
+UI.TAB_LABELS ={Jogadores="◉  JOGADORES",Movimento="➤  MOVIMENTO",Visual="◈  VISUAL",
+    Radar="◎  RADAR",Utilidades="⚙  UTILIDADES",ParkHero="♫  PARK HERO",Voz="♫  VOZ",Config="☰  CONFIG"}
+UI.tabButtons = {}
+UI.pages = {}
+UI.currentTab = "Jogadores"
+local function createPage(name)
+    local page = new("ScrollingFrame", {Name = name,Position=UDim2.fromOffset(198,91),
+        Size=UDim2.new(1,-213,1,-145), BackgroundTransparency=1,
+        BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = C.ACCENT,
+        CanvasSize = UDim2.new(0,0,0,0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = (name == UI.currentTab)}, Root)
+    table.insert(themeBindings, {object=page, propertyName="ScrollBarImageColor3", token="ACCENT"})
+    local layout = new("UIListLayout", {Padding = UDim.new(0,11), SortOrder = Enum.SortOrder.LayoutOrder}, page)
+    new("UIPadding", {PaddingTop=UDim.new(0,3), PaddingBottom=UDim.new(0,14),
+        PaddingLeft=UDim.new(0,2), PaddingRight=UDim.new(0,5)}, page)
+    UI.pages[name] = page
+    return page
+end
+for _, name in ipairs(UI.TAB_NAMES) do
+    local tab = basicButton(UI.TabsBar, name, 130)
+    tab.Size=UDim2.new(1,-5,0,42)
+    tab.Text=UI.TAB_LABELS[name]
+    tab.TextXAlignment=Enum.TextXAlignment.Left
+    tab.TextSize=11
+    new("UIPadding",{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,7)},tab)
+    UI.tabButtons[name]=tab
+    createPage(name)
+end
+local function setTab(name)
+    if destroyed or not UI.pages[name] then return end
+    UI.currentTab = name
+    for _, tab in ipairs(UI.TAB_NAMES) do
+        UI.pages[tab].Visible = (tab == name)
+        UI.tabButtons[tab].BackgroundColor3=tab==name and C.ACCENT or C.CARD
+        UI.tabButtons[tab].TextColor3=tab==name and C.BG or C.TEXT
+    end
+end
+for _, name in ipairs(UI.TAB_NAMES) do
+    UI.tabButtons[name].MouseButton1Click:Connect(function() setTab(name) end)
+end
+setTab("Jogadores")
+
+UI.footer = new("Frame", {Position = UDim2.new(0,16,1,-41),
+    Size = UDim2.new(1,-32,0,29), BorderSizePixel=0}, Root)
+bindTheme(UI.footer,"BackgroundColor3","BG")
+corner(UI.footer,8)
+UI.footerLeft = textLabel(UI.footer,"● MAYCK ORBIT V6.0  •  STATUS LOCAL",10,true,"GOOD")
+UI.footerLeft.Position = UDim2.fromOffset(12,0)
+UI.footerLeft.Size = UDim2.new(0.6,-12,1,0)
+UI.fpsLabel = textLabel(UI.footer,"FPS --  |  PING --",10,true,"MUTED")
+UI.fpsLabel.Position=UDim2.new(0.6,0,0,0)
+UI.fpsLabel.Size=UDim2.new(0.4,-12,1,0)
+UI.fpsLabel.TextXAlignment=Enum.TextXAlignment.Right
+
+-- Botão flutuante independente da janela (não fica sob o overlay).
+UI.FloatButton =basicButton(Gui,"M",58)
+UI.FloatButton.Name="MayckFloatingM"
+UI.FloatButton.Size=UDim2.fromOffset(58,58)
+UI.FloatButton.AnchorPoint=Vector2.new(0.5,0.5)
+UI.FloatButton.Position=UDim2.new(1,-48,1,-62)
+UI.FloatButton.Active=true
+UI.FloatButton.Selectable=false
+UI.FloatButton.Font=Enum.Font.GothamBlack
+UI.FloatButton.TextSize=24
+bindTheme(UI.FloatButton,"BackgroundColor3","ACCENT")
+bindTheme(UI.FloatButton,"TextColor3","BG")
+corner(UI.FloatButton,17)
+UI.FloatButton.ZIndex=120
+UI.floatOutline =stroke(UI.FloatButton,C.ACCENT2,0.1)
+UI.floatOutline.Thickness=2
+UI.floatScale =new("UIScale",{Scale=1},UI.FloatButton)
+UI.toastHost = new("Frame", {BackgroundTransparency=1, Position=UDim2.new(0.5,0,0,15),
+    AnchorPoint=Vector2.new(0.5,0), Size=UDim2.new(0.9,0,0,150)}, Gui)
+new("UIListLayout", {HorizontalAlignment=Enum.HorizontalAlignment.Center,
+    Padding=UDim.new(0,6), SortOrder=Enum.SortOrder.LayoutOrder}, UI.toastHost)
+local function notify(message, positive)
+    if destroyed then return end
+    local item = new("TextLabel", {BackgroundTransparency=0.04, Size=UDim2.new(0, math.min(390,math.max(210,#message*7+30)),0,37),
+        Text=message, TextSize=12, TextWrapped=true, Font=Enum.Font.GothamBold,
+        TextColor3=C.TEXT, BackgroundColor3=C.CARD, ZIndex=50},UI.toastHost)
+    corner(item,10)
+    stroke(item,positive and C.GOOD or C.ACCENT,0.12)
+    table.insert(notifications,item)
+    task.delay(2.6,function()
+        if item and item.Parent then item:Destroy() end
+    end)
+end
+
+-- RESPONSIVIDADE + ARRASTAR ------------------------------------------
+local isOpen = false
+local activeDrag = nil
+local function viewport()
+    local cam = Workspace.CurrentCamera
+    return cam and cam.ViewportSize or Vector2.new(1200,800)
+end
+local function panelSize()
+    local v = viewport()
+    local targetW = settings.Compact and 650 or 780
+    local targetH = settings.Compact and 455 or 535
+    return UDim2.fromOffset(math.max(280,math.min(targetW,v.X-20)),
+        math.max(305,math.min(targetH,v.Y-38)))
+end
+local function fitToScreen()
+    local v=viewport()
+    local s=panelSize()
+    Root.Size=s
+    local ax=Root.Position.X.Scale*v.X+Root.Position.X.Offset
+    local ay=Root.Position.Y.Scale*v.Y+Root.Position.Y.Offset
+    ax=math.clamp(ax,s.X.Offset/2+8,math.max(s.X.Offset/2+8,v.X-s.X.Offset/2-8))
+    ay=math.clamp(ay,s.Y.Offset/2+8,math.max(s.Y.Offset/2+8,v.Y-s.Y.Offset/2-8))
+    Root.Position=UDim2.fromOffset(ax,ay)
+    local small=s.X.Offset<610
+    UI.head.TextSize=small and 17 or 21
+    UI.tagline.TextSize=small and 9 or 10
+    UI.tagline.Text=small and "V6.0 • ORBIT" or "V6.0 • PARK HERO FLUTUANTE"
+    UI.sidebarBackdrop.Visible=not small
+    UI.sidebarTitle.Visible=not small
+    if small then
+        UI.TabsBar.Position=UDim2.fromOffset(14,84)
+        UI.TabsBar.Size=UDim2.new(1,-28,0,45)
+        UI.TabsBar.ScrollingDirection=Enum.ScrollingDirection.X
+        UI.TabsBar.AutomaticCanvasSize=Enum.AutomaticSize.X
+        UI.TabsLayout.FillDirection=Enum.FillDirection.Horizontal
+        UI.TabsLayout.HorizontalAlignment=Enum.HorizontalAlignment.Left
+        UI.TabsLayout.VerticalAlignment=Enum.VerticalAlignment.Center
+        for _,name in ipairs(UI.TAB_NAMES) do
+            local tab=UI.tabButtons[name]
+            tab.Size=UDim2.fromOffset((name=="Utilidades" or name=="ParkHero") and 120 or 105,37)
+            tab.Text=UI.TAB_LABELS[name]
+            tab.TextSize=10
+        end
+        for _,page in pairs(UI.pages) do
+            page.Position=UDim2.fromOffset(14,137)
+            page.Size=UDim2.new(1,-28,1,-190)
+        end
+    else
+        UI.TabsBar.Position=UDim2.fromOffset(18,123)
+        UI.TabsBar.Size=UDim2.new(0,156,1,-185)
+        UI.TabsBar.ScrollingDirection=Enum.ScrollingDirection.Y
+        UI.TabsBar.AutomaticCanvasSize=Enum.AutomaticSize.Y
+        UI.TabsLayout.FillDirection=Enum.FillDirection.Vertical
+        UI.TabsLayout.HorizontalAlignment=Enum.HorizontalAlignment.Center
+        UI.TabsLayout.VerticalAlignment=Enum.VerticalAlignment.Top
+        for _,name in ipairs(UI.TAB_NAMES) do
+            local tab=UI.tabButtons[name]
+            tab.Size=UDim2.new(1,-5,0,42)
+            tab.Text=UI.TAB_LABELS[name]
+            tab.TextSize=11
+        end
+        for _,page in pairs(UI.pages) do
+            page.Position=UDim2.fromOffset(198,91)
+            page.Size=UDim2.new(1,-213,1,-145)
+        end
+    end
+    UI.footerLeft.Text=small and "● MAYCK V6.0" or "● MAYCK ORBIT V6.0 • STATUS LOCAL"
+end
+fitToScreen()
+local function togglePanel(force)
+    if destroyed then return end
+    if force == nil then isOpen = not isOpen else isOpen = force end
+    if isOpen then
+        fitToScreen()
+        Root.Visible=true
+        UI.Overlay.Visible=true
+        RootScale.Scale=0.96
+        tween(RootScale,0.2,{Scale=1},Enum.EasingStyle.Back)
+        tween(UI.Overlay,0.2,{BackgroundTransparency=0.64})
+    else
+        tween(RootScale,0.14,{Scale=0.96})
+        tween(UI.Overlay,0.14,{BackgroundTransparency=1})
+        task.delay(0.16,function()
+            if not destroyed and not isOpen then Root.Visible=false UI.Overlay.Visible=false end
+        end)
+    end
+end
+UI.minimizeBtn.MouseButton1Click:Connect(function() togglePanel(false) end)
+UI.closeBtn.MouseButton1Click:Connect(function() togglePanel(false) end)
+-- M v5.6: arrasto por amostragem da posição do mouse; toque por InputChanged.
+-- Eventos MouseMovement podem não ser entregues ao botão durante o drag.
+V4.floatDragging = false
+V4.floatIsTouch = false
+V4.floatTouchInput = nil
+V4.floatStart = nil
+V4.floatCenterStart = nil
+V4.floatLastPosition = nil
+V4.floatMoved = false
+V4.floatThreshold = 6
+function V4.clampFloatPosition(pixel)
+    local vp = viewport()
+    local half = UI.FloatButton.AbsoluteSize * 0.5
+    return Vector2.new(
+        math.clamp(pixel.X, half.X + 6, math.max(half.X + 6, vp.X - half.X - 6)),
+        math.clamp(pixel.Y, half.Y + 6, math.max(half.Y + 6, vp.Y - half.Y - 6))
+    )
+end
+local function applyFloatPointer(position)
+    if destroyed or not V4.floatDragging or not position or not V4.floatStart then return end
+    V4.floatLastPosition = position
+    local delta = position - V4.floatStart
+    if delta.Magnitude >= V4.floatThreshold then V4.floatMoved = true end
+    if V4.floatMoved and not settings.LockFloat then
+        local at = V4.clampFloatPosition(V4.floatCenterStart + delta)
+        UI.FloatButton.Position = UDim2.fromOffset(at.X, at.Y)
+    end
+end
+local function finishFloatGesture()
+    if not V4.floatDragging then return end
+    local wasClick = not V4.floatMoved
+    V4.floatDragging = false
+    V4.floatTouchInput = nil
+    V4.floatStart = nil
+    V4.floatCenterStart = nil
+    V4.floatLastPosition = nil
+    V4.floatMoved = false
+    UI.floatScale.Scale = 1
+    if wasClick and not destroyed then togglePanel() end
+end
+UI.FloatButton.InputBegan:Connect(function(input)
+    if destroyed or V4.floatDragging then return end
+    local kind = input.UserInputType
+    if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.Touch then return end
+    V4.floatDragging = true
+    V4.floatIsTouch = kind == Enum.UserInputType.Touch
+    V4.floatTouchInput = V4.floatIsTouch and input or nil
+    V4.floatStart = V4.floatIsTouch and input.Position or UserInputService:GetMouseLocation()
+    V4.floatCenterStart = UI.FloatButton.AbsolutePosition + UI.FloatButton.AbsoluteSize * 0.5
+    V4.floatLastPosition = V4.floatStart
+    V4.floatMoved = false
+    UI.floatScale.Scale = 0.94
+end)
+connect(UserInputService.InputChanged, function(input)
+    if not V4.floatDragging or not V4.floatIsTouch then return end
+    if input == V4.floatTouchInput then applyFloatPointer(input.Position) end
+end)
+connect(UserInputService.InputEnded, function(input)
+    if not V4.floatDragging then return end
+    if V4.floatIsTouch then
+        if input ~= V4.floatTouchInput then return end
+        applyFloatPointer(input.Position)
+    else
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        applyFloatPointer(UserInputService:GetMouseLocation())
+    end
+    finishFloatGesture()
+end)
+-- Polling durante o gesto: funciona mesmo que o cursor saia da área do botão.
+connect(RunService.RenderStepped, function()
+    if not V4.floatDragging or V4.floatIsTouch or destroyed then return end
+    if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        applyFloatPointer(UserInputService:GetMouseLocation())
+    else
+        finishFloatGesture()
+    end
+end)
+
+local function dragTarget(target, handle)
+    local drag=false
+    local dragStart, beginPosition, currentTouch
+    handle.InputBegan:Connect(function(input)
+        if destroyed then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            drag=true
+            currentTouch=input.UserInputType==Enum.UserInputType.Touch and input or nil
+            dragStart=input.Position
+            beginPosition=target.Position
+        end
+    end)
+    connect(UserInputService.InputChanged,function(input)
+        if not drag or destroyed then return end
+        if (currentTouch and input==currentTouch) or
+            (not currentTouch and input.UserInputType==Enum.UserInputType.MouseMovement) then
+            local delta=input.Position-dragStart
+            local proposed=UDim2.new(beginPosition.X.Scale,beginPosition.X.Offset+delta.X,
+                beginPosition.Y.Scale,beginPosition.Y.Offset+delta.Y)
+            target.Position=proposed
+            if target==Root then
+                local v=viewport()
+                local x=target.Position.X.Scale*v.X+target.Position.X.Offset
+                local y=target.Position.Y.Scale*v.Y+target.Position.Y.Offset
+                x=math.clamp(x,target.AbsoluteSize.X/2+8,v.X-target.AbsoluteSize.X/2-8)
+                y=math.clamp(y,target.AbsoluteSize.Y/2+8,v.Y-target.AbsoluteSize.Y/2-8)
+                target.Position=UDim2.fromOffset(x,y)
+            elseif target==V4.RadarHUD then
+                local v=viewport()
+                local x=target.Position.X.Scale*v.X+target.Position.X.Offset
+                local y=target.Position.Y.Scale*v.Y+target.Position.Y.Offset
+                target.Position=UDim2.fromOffset(math.clamp(x,0,math.max(0,v.X-target.AbsoluteSize.X)),
+                    math.clamp(y,0,math.max(0,v.Y-target.AbsoluteSize.Y)))
+            end
+        end
+    end)
+    connect(UserInputService.InputEnded,function(input)
+        if (currentTouch and input==currentTouch) or
+            (not currentTouch and input.UserInputType==Enum.UserInputType.MouseButton1) then
+            drag=false
+            currentTouch=nil
+        end
+    end)
+end
+-- A barra usa o fundo do cabeçalho; botões por cima continuam clicáveis.
+UI.backdrop.Active = true
+dragTarget(Root, UI.backdrop)
+
+-- COMPONENTES DE CONTEÚDO --------------------------------------------
+local function section(page, title, description)
+    local shell = new("Frame", {Size=UDim2.new(1,-2,0,0), AutomaticSize=Enum.AutomaticSize.Y,
+        BackgroundTransparency=0, BorderSizePixel=0}, page)
+    bindTheme(shell,"BackgroundColor3","CARD")
+    corner(shell,12)
+    local border=stroke(shell)
+    bindTheme(border,"Color","BORDER")
+    local layout=new("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},shell)
+    new("UIPadding",{PaddingTop=UDim.new(0,14),PaddingBottom=UDim.new(0,14),
+        PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14)},shell)
+    local h=textLabel(shell,title,14,true)
+    h.Size=UDim2.new(1,0,0,23)
+    if description then
+        local d=textLabel(shell,description,11,false,"MUTED")
+        d.Size=UDim2.new(1,0,0,28)
+        d.TextWrapped=true
+    end
+    return shell
+end
+local function settingRow(parent, title, description, actionWidth)
+    local row=new("Frame",{Size=UDim2.new(1,0,0,49),BackgroundTransparency=1},parent)
+    local t=textLabel(row,title,12,true)
+    t.Size=UDim2.new(1,-(actionWidth or 112)-12,0,22)
+    t.Position=UDim2.fromOffset(0,3)
+    local d=textLabel(row,description or "",10,false,"MUTED")
+    d.Size=UDim2.new(1,-(actionWidth or 112)-12,0,17)
+    d.Position=UDim2.fromOffset(0,24)
+    return row
+end
+local featureChanged
+local function toggle(parent, key, title, subtitle)
+    local row=settingRow(parent,title,subtitle,106)
+    local b=basicButton(row,"OFF",96)
+    b.AnchorPoint=Vector2.new(1,0.5)
+    b.Position=UDim2.new(1,0,0.5,0)
+    local function paint()
+        local active=settings[key]
+        b.Text=active and "●  ON" or "○  OFF"
+        b.BackgroundColor3=active and C.ACCENT or C.PANEL
+        b.TextColor3=active and C.BG or C.MUTED
+    end
+    toggles[key]={button=b,paint=paint}
+    b.MouseButton1Click:Connect(function()
+        if destroyed then return end
+        settings[key]=not settings[key]
+        paint()
+        if featureChanged then featureChanged(key) end
+    end)
+    paint()
+    return row
+end
+-- Declaração antecipada: callbacks precisam referenciar a mesma variável local.
+-- (O corpo será atribuído depois da construção da interface.)
+local sliders={}
+local function slider(parent, key, title, minValue, maxValue, step)
+    local row = new("Frame",{Size=UDim2.new(1,0,0,68),BackgroundTransparency=1},parent)
+    local label = textLabel(row,title,12,true)
+    label.Size=UDim2.new(1,-100,0,24)
+    local amount = textLabel(row,tostring(settings[key]),12,true,"ACCENT")
+    amount.Size=UDim2.new(0,90,0,24)
+    amount.Position=UDim2.new(1,-90,0,0)
+    amount.TextXAlignment=Enum.TextXAlignment.Right
+    local trackBar=new("Frame", {Size=UDim2.new(1,-2,0,13), Position=UDim2.fromOffset(1,35),
+        BorderSizePixel=0, Active=true},row)
+    bindTheme(trackBar,"BackgroundColor3","PANEL")
+    corner(trackBar,7)
+    local fill = new("Frame", {BorderSizePixel=0, Size=UDim2.fromScale(0,1)},trackBar)
+    bindTheme(fill,"BackgroundColor3","ACCENT")
+    corner(fill,7)
+    local knob=new("Frame",{Size=UDim2.fromOffset(18,18),AnchorPoint=Vector2.new(0.5,0.5),
+        Position=UDim2.fromScale(0,0.5),BorderSizePixel=0},trackBar)
+    bindTheme(knob,"BackgroundColor3","TEXT")
+    corner(knob,9)
+    local function render()
+        local v=math.clamp(settings[key],minValue,maxValue)
+        local f=(v-minValue)/(maxValue-minValue)
+        fill.Size=UDim2.fromScale(f,1)
+        knob.Position=UDim2.fromScale(f,0.5)
+        amount.Text=tostring(v)
+    end
+    local dragging=false
+    local touch=nil
+    local function update(input)
+        local x=math.clamp((input.Position.X-trackBar.AbsolutePosition.X)/math.max(1,trackBar.AbsoluteSize.X),0,1)
+        local raw=minValue+x*(maxValue-minValue)
+        settings[key]=math.clamp(math.floor(raw/step+0.5)*step,minValue,maxValue)
+        render()
+        if featureChanged then featureChanged(key) end
+    end
+    local function begin(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            dragging=true
+            touch=input.UserInputType==Enum.UserInputType.Touch and input or nil
+            update(input)
+        end
+    end
+    trackBar.InputBegan:Connect(begin)
+    knob.InputBegan:Connect(begin)
+    connect(UserInputService.InputChanged,function(input)
+        if dragging and not destroyed and ((touch and touch==input) or
+            (not touch and input.UserInputType==Enum.UserInputType.MouseMovement)) then update(input) end
+    end)
+    connect(UserInputService.InputEnded,function(input)
+        if (touch and input==touch) or (not touch and input.UserInputType==Enum.UserInputType.MouseButton1) then
+            dragging=false
+            touch=nil
+        end
+    end)
+    sliders[key]=render
+    render()
+end
+
+
+-- PARK HERO: motor original da versão Dual Mode (mantido em escopo separado).
+-- Interface antiga invisível: os controles ficam apenas nesta aba.
+UI.Park = {engine=nil}
+local function createParkEngine()
+    -- MAYCK PARK HERO | Dual Mode v2.2 | Correção exclusiva de layout
+    -- Protótipo independente. Detecta apenas objetos expostos em PlayerGui/Workspace; não lê a tela.
+    -- Não lê pixels; teclas simuladas exigem keypress/keyrelease disponíveis no executor.
+    local Players = game:GetService('Players')
+    local RunService = game:GetService('RunService')
+    local UIS = game:GetService('UserInputService')
+    local CoreGui = game:GetService('CoreGui')
+    local LP = Players.LocalPlayer
+    if not LP then return end
+    local previousUI = CoreGui:FindFirstChild('MayckParkHeroIntegratedEngine')
+    if previousUI then previousUI:Destroy() end
+    local alive, connections = true, {}
+    local function hook(event, cb)
+        local conn = event:Connect(cb)
+        connections[#connections + 1] = conn
+        return conn
+    end
+    local MODES = {
+        Original = {keys={'A','S','J','K'}, vk={0x41,0x53,0x4A,0x4B}, lanes={.10,.36,.64,.90}},
+        Avancado = {keys={'A','S','J','K','L'}, vk={0x41,0x53,0x4A,0x4B,0x4C}, lanes={.15,.325,.50,.675,.85}},
+    }
+    local mode = 'Avancado'
+    local KEYS, VK = MODES[mode].keys, MODES[mode].vk
+    local savedLanes = {Original={.10,.36,.64,.90}, Avancado={.15,.325,.50,.675,.85}}
+    local settings = {
+        active=false, world=true, gui=true, showLine=true,
+        timingMs=0, pressMs=65, tolerance=28, minSpeed=8, scanInterval=.016,
+        expanded=false,
+        -- Each receptor can be calibrated independently by clicking its CENTER.
+        laneXs={.15,.325,.50,.675,.85}, lineY=.88,
+    }
+    local trackData=setmetatable({}, {__mode='k'})
+    local held={}
+    local hits, notesSeen, lastEvent=0,0,'Aguardando...'
+    local dropped, unknown, currentSource=0,0,'—'
+    local calibration=0
+    local scanClock=0
+    local refreshIndex
+    local uiClock=0
+    local uiInterval=.18 -- interface/text refresh 5-6 times per second, not 60
+    local nowClock=os.clock
+    local function sendDown(lane)
+        if type(keypress)~='function' or type(keyrelease)~='function' then
+            lastEvent='Sem keypress/keyrelease neste ambiente'
+            return false
+        end
+        local ok,err=pcall(keypress,VK[lane])
+        if not ok then lastEvent='keypress: '..tostring(err);return false end
+        return true
+    end
+    local function sendUp(lane)
+        if type(keyrelease)=='function' then pcall(keyrelease,VK[lane]) end
+    end
+    local function releaseAll()
+        for lane in pairs(held) do sendUp(lane);held[lane]=nil end
+    end
+    local GUI=Instance.new('ScreenGui')
+    GUI.Name='MayckParkHeroIntegratedEngine'; GUI.IgnoreGuiInset=true; GUI.ResetOnSpawn=false
+    GUI.DisplayOrder=10000; GUI.Parent=CoreGui
+    local BG=Color3.fromRGB(12,15,25)
+    local PANEL=Color3.fromRGB(23,28,45)
+    local ACCENT=Color3.fromRGB(37,225,166)
+    local MUTED=Color3.fromRGB(151,166,192)
+    local frame=Instance.new('Frame')
+    frame.Name='Panel';frame.Size=UDim2.fromOffset(420,572)
+    frame.Position=UDim2.new(1,-440,.5,-262)
+    frame.BackgroundColor3=BG;frame.BorderSizePixel=0;frame.Active=true;frame.Parent=GUI;frame.Visible=false
+    Instance.new('UICorner',frame).CornerRadius=UDim.new(0,16)
+    local edge=Instance.new('UIStroke');edge.Color=Color3.fromRGB(71,86,121);edge.Transparency=.25;edge.Parent=frame
+    local function label(s,x,y,w,h,size,color,bold,parent)
+        local t=Instance.new('TextLabel')
+        t.Position=UDim2.fromOffset(x,y);t.Size=UDim2.fromOffset(w,h)
+        t.BackgroundTransparency=1;t.Text=s;t.TextWrapped=true
+        t.TextXAlignment=Enum.TextXAlignment.Left
+        t.TextYAlignment=Enum.TextYAlignment.Center
+        t.Font=bold and Enum.Font.GothamBold or Enum.Font.GothamMedium
+        t.TextSize=size or 12;t.TextColor3=color or Color3.new(1,1,1)
+        t.Parent=parent or frame;return t
+    end
+    -- Título e subtítulo agora pertencem ao cabeçalho (head), assim não são movidos
+    -- pelo deslocamento de 66px reservado para a seleção de modos.
+    local head=Instance.new('Frame');head.Size=UDim2.new(1,0,0,70)
+    head.BackgroundColor3=PANEL;head.BorderSizePixel=0;head.Parent=frame
+    Instance.new('UICorner',head).CornerRadius=UDim.new(0,16)
+    label('MAYCK  /  PARK HERO',18,8,300,30,19,ACCENT,true,head)
+    local subtitle=label('AUTO NOTES  •  MODO AVANÇADO  •  5 TECLAS',19,37,310,17,10,MUTED,false,head)
+    local function btn(s,x,y,w,h,fn,color)
+        local b=Instance.new('TextButton');b.Position=UDim2.fromOffset(x,y)
+        b.Size=UDim2.fromOffset(w,h or 34);b.BackgroundColor3=color or PANEL
+        b.Text=s;b.TextSize=11;b.TextColor3=Color3.fromRGB(246,249,255)
+        b.Font=Enum.Font.GothamBold;b.AutoButtonColor=true;b.BorderSizePixel=0;b.Parent=frame
+        Instance.new('UICorner',b).CornerRadius=UDim.new(0,9)
+        hook(b.MouseButton1Click,function() if alive then fn(b) end end)
+        return b
+    end
+    -- Minimize only the visual panel. Do not change settings.active, scan timers or key state.
+    local minimized=false
+    local statusBadge=label('● PRONTO',260,53,130,14,10,MUTED,true,head)
+    local mini=btn('—',335,18,31,31,function(b)
+        minimized=not minimized
+        b.Text=minimized and '+' or '—'
+        for _,c in ipairs(frame:GetChildren()) do
+            if c~=head and c:IsA('GuiObject') then
+                c.Visible=not minimized
+            end
+        end
+        frame.Size=minimized and UDim2.fromOffset(420,70) or UDim2.fromOffset(420,572)
+        lastEvent=minimized and 'Painel minimizado; detector continua ativo' or 'Painel expandido'
+    end)
+    mini.Parent=head;mini.Position=UDim2.fromOffset(335,18)
+    local close=btn('×',374,18,31,31,function() frame.Visible=false end,Color3.fromRGB(174,54,86))
+    close.Parent=head;close.Position=UDim2.fromOffset(374,18)
+    label('TECLAS',18,80,90,18,11,MUTED,true)
+    local colors={Color3.fromRGB(40,174,89),Color3.fromRGB(211,66,74),Color3.fromRGB(235,189,44),Color3.fromRGB(39,145,218),Color3.fromRGB(218,130,38)}
+    local keyBlocks={}
+    for i,k in ipairs(MODES.Avancado.keys) do
+        local x=18+(i-1)*80
+        local block=Instance.new('Frame');block.Position=UDim2.fromOffset(x,101)
+        block.Size=UDim2.fromOffset(70,32);block.BackgroundColor3=colors[i];block.Parent=frame
+        Instance.new('UICorner',block).CornerRadius=UDim.new(0,9)
+        local tx=label(k,0,0,70,32,16,Color3.new(1,1,1),true,block)
+        tx.TextXAlignment=Enum.TextXAlignment.Center
+        keyBlocks[i]=block
+    end
+    local start=btn('▶ INICIAR',18,146,186,39,function(b)
+        settings.active=not settings.active
+        if not settings.active then releaseAll() end
+        b.Text=settings.active and 'Ⅱ PAUSAR' or '▶ INICIAR'
+        lastEvent=settings.active and 'Buscando notas da partida...' or 'Pausado'
+    end,Color3.fromRGB(10,159,117))
+    local calibrateButton=btn('◎ CALIBRAR 5',214,146,188,39,function()
+        calibration=1;lastEvent='Clique no centro do receptor A'
+    end)
+    label('LINHA DE ACERTO',18,199,300,17,11,MUTED,true)
+    local lineValue=label('88%',345,199,52,17,11,ACCENT,true)
+    local slider=Instance.new('Frame');slider.Position=UDim2.fromOffset(18,224)
+    slider.Size=UDim2.fromOffset(384,14);slider.BackgroundColor3=PANEL;slider.Active=true;slider.Parent=frame
+    Instance.new('UICorner',slider).CornerRadius=UDim.new(1,0)
+    local fill=Instance.new('Frame');fill.BackgroundColor3=ACCENT
+    fill.Size=UDim2.fromScale(.88,1);fill.Parent=slider
+    Instance.new('UICorner',fill).CornerRadius=UDim.new(1,0)
+    local knob=Instance.new('TextButton');knob.Size=UDim2.fromOffset(24,24)
+    knob.Text='';knob.BackgroundColor3=Color3.fromRGB(235,246,255);knob.Parent=slider
+    Instance.new('UICorner',knob).CornerRadius=UDim.new(1,0)
+    local function setLine(p)
+        settings.lineY=math.clamp(p,.12,.97)
+        fill.Size=UDim2.fromScale(settings.lineY,1)
+        knob.Position=UDim2.new(settings.lineY,-12,.5,-12)
+        lineValue.Text=string.format('%.0f%%',settings.lineY*100)
+    end
+    local slideDrag=false
+    local function moveSlider(x)
+        if slider.AbsoluteSize.X>0 then
+            setLine((x-slider.AbsolutePosition.X)/slider.AbsoluteSize.X)
+        end
+    end
+    hook(slider.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            slideDrag=true;moveSlider(input.Position.X)
+        end
+    end)
+    hook(knob.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            slideDrag=true;moveSlider(input.Position.X)
+        end
+    end)
+    btn('LINHA −',18,247,119,30,function()setLine(settings.lineY-.025)end)
+    btn('LINHA +',146,247,119,30,function()setLine(settings.lineY+.025)end)
+    btn('GUI + 3D',274,247,128,30,function(b)
+        if settings.gui and settings.world then settings.world=false;b.Text='SÓ GUI'
+        elseif settings.gui then settings.gui=false;settings.world=true;b.Text='SÓ 3D'
+        else settings.gui=true;settings.world=true;b.Text='GUI + 3D' end
+    end)
+    label('SINCRONIZAÇÃO',18,289,210,17,11,MUTED,true)
+    local timingLabel=label('Offset: 0 ms',18,311,160,26,12,ACCENT,true)
+    local tapLabel=label('Toque: 65 ms',215,311,154,26,12,ACCENT,true)
+    btn('−',141,311,32,27,function() settings.timingMs=math.max(-200,settings.timingMs-5);timingLabel.Text='Offset: '..settings.timingMs..' ms' end)
+    btn('+',178,311,32,27,function() settings.timingMs=math.min(200,settings.timingMs+5);timingLabel.Text='Offset: '..settings.timingMs..' ms' end)
+    btn('−',339,311,29,27,function()settings.pressMs=math.max(20,settings.pressMs-5);tapLabel.Text='Toque: '..settings.pressMs..' ms' end)
+    btn('+',373,311,29,27,function()settings.pressMs=math.min(250,settings.pressMs+5);tapLabel.Text='Toque: '..settings.pressMs..' ms' end)
+    btn('NOMES: NORMAL',18,349,184,31,function(b)
+        settings.expanded=not settings.expanded
+        b.Text=settings.expanded and 'NOMES: AMPLIADOS' or 'NOMES: NORMAL'
+        if refreshIndex then refreshIndex() end
+    end)
+    btn('RESETAR AJUSTES',212,349,190,31,function()
+        savedLanes[mode] = table.clone(MODES[mode].lanes)
+        settings.laneXs=table.clone(savedLanes[mode]);setLine(.88)
+        settings.timingMs=0;settings.pressMs=65;releaseAll()
+        timingLabel.Text='Offset: 0 ms';tapLabel.Text='Toque: 65 ms'
+        trackData=setmetatable({}, {__mode='k'})
+        lastEvent='Ajustes restaurados; calibre os receptores do modo selecionado'
+    end)
+    local diag=label('',18,389,385,43,10,Color3.fromRGB(222,232,243))
+    local bottom=label('Calibre os receptores de A até L.',18,432,385,16,10,MUTED)
+    local line=Instance.new('Frame');line.Name='HitLine'
+    line.Size=UDim2.new(1,0,0,2);line.BorderSizePixel=0
+    line.BackgroundColor3=ACCENT;line.BackgroundTransparency=.12;line.Visible=false;line.Parent=GUI
+    local marks={}
+    for i=1,5 do
+        local m=Instance.new('TextLabel');m.Size=UDim2.fromOffset(36,24)
+        m.BackgroundTransparency=.12;m.BackgroundColor3=colors[i]
+        m.Text=KEYS[i];m.TextColor3=Color3.new(1,1,1);m.TextSize=14
+        m.Font=Enum.Font.GothamBlack;m.Visible=false;m.Parent=GUI
+        Instance.new('UICorner',m).CornerRadius=UDim.new(0,7)
+        marks[i]=m
+    end
+    -- Os marcadores são visíveis SOMENTE durante a execução.
+    -- A calibração é preservada ao pausar; apenas a aparência muda.
+    local function updateHitOverlay()
+        local visible = alive and settings.active and settings.showLine
+        line.Visible = visible
+        for i, marker in ipairs(marks) do
+            marker.Visible = visible and i <= #KEYS
+        end
+    end
+    updateHitOverlay()
+    local function setOverlayVisible(value)
+        settings.showLine = value
+        updateHitOverlay()
+        lastEvent = value and 'Linha e marcadores visiveis' or 'Linha e marcadores ocultos; Auto Notes mantido'
+    end
+    -- Keep existing controls and their callbacks, only move them down for the mode section.
+    for _,item in ipairs(frame:GetChildren()) do
+        if item:IsA('GuiObject') and item~=head then
+            item.Position=UDim2.new(item.Position.X.Scale,item.Position.X.Offset,
+                item.Position.Y.Scale,item.Position.Y.Offset+66)
+        end
+    end
+    -- Barra adicional fora do deslocamento antigo (+66); nao interfere nas configuracoes.
+    local overlayButton
+    overlayButton=btn('◉ OCULTAR LINHA / TECLAS',18,524,384,34,function()
+        setOverlayVisible(not settings.showLine)
+        -- Atualiza o texto pelo estado atual sem afetar a execucao.
+        overlayButton.Text=settings.showLine and '◉ OCULTAR LINHA / TECLAS  [F8]' or '◎ MOSTRAR LINHA / TECLAS  [F8]'
+    end)
+    local function updateOverlayButton()
+        overlayButton.Text=settings.showLine and '◉ OCULTAR LINHA / TECLAS  [F8]' or '◎ MOSTRAR LINHA / TECLAS  [F8]'
+        overlayButton.BackgroundColor3=settings.showLine and PANEL or Color3.fromRGB(16,95,81)
+    end
+    updateOverlayButton()
+    hook(UIS.InputBegan,function(input,processed)
+        if not alive or processed or UIS:GetFocusedTextBox() then return end
+        if input.KeyCode==Enum.KeyCode.F7 then
+            settings.active=not settings.active
+            if not settings.active then releaseAll() end
+            updateHitOverlay()
+            start.Text=settings.active and 'Ⅱ PAUSAR' or '▶ INICIAR'
+            lastEvent=settings.active and 'Ativado com F7' or 'Pausado com F7'
+        elseif input.KeyCode==Enum.KeyCode.F8 then
+            setOverlayVisible(not settings.showLine)
+            updateOverlayButton()
+        end
+    end)
+    label('MODO DE JOGO',18,78,240,18,11,MUTED,true)
+    local originalButton, advancedButton
+    local function syncModeUI()
+        subtitle.Text = (mode=='Original') and 'AUTO NOTES  •  MODO ORIGINAL  •  4 TECLAS'
+            or 'AUTO NOTES  •  MODO AVANÇADO  •  5 TECLAS'
+        calibrateButton.Text='◎ CALIBRAR '..#KEYS
+        for i,block in ipairs(keyBlocks) do
+            block.Visible=i<=#KEYS
+            if i<=#KEYS then
+                local w=(mode=='Original') and 88 or 70
+                local gap=(mode=='Original') and 10 or 10
+                block.Size=UDim2.fromOffset(w,32)
+                block.Position=UDim2.fromOffset(18+(i-1)*(w+gap),167)
+                for _,c in ipairs(block:GetChildren()) do
+                    if c:IsA('TextLabel') then c.Size=UDim2.fromOffset(w,32) end
+                end
+            end
+        end
+        updateHitOverlay()
+        originalButton.BackgroundColor3=mode=='Original' and Color3.fromRGB(10,159,117) or PANEL
+        advancedButton.BackgroundColor3=mode=='Avancado' and Color3.fromRGB(10,159,117) or PANEL
+    end
+    local function selectMode(nextMode)
+        if mode==nextMode then return end
+        -- Prevent held keys and old tracked notes from spilling into another mode.
+        releaseAll()
+        settings.active=false
+        updateHitOverlay()
+        start.Text='▶ INICIAR'
+        calibration=0
+        savedLanes[mode]=table.clone(settings.laneXs)
+        mode=nextMode
+        KEYS,VK=MODES[mode].keys,MODES[mode].vk
+        settings.laneXs=table.clone(savedLanes[mode])
+        trackData=setmetatable({}, {__mode='k'})
+        hits,notesSeen,dropped=0,0,0
+        lastEvent='Modo '..(mode=='Original' and 'Original (A/S/J/K)' or 'Avançado (A/S/J/K/L)')..' selecionado; calibre os receptores'
+        syncModeUI()
+    end
+    originalButton=btn('ORIGINAL  •  4',18,102,186,36,function() selectMode('Original') end)
+    advancedButton=btn('AVANÇADO  •  5',214,102,188,36,function() selectMode('Avancado') end)
+    syncModeUI()
+    local dragging=false;local dragAt,frameAt
+    hook(head.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            dragging=true;dragAt=input.Position;frameAt=frame.Position
+        end
+    end)
+    hook(UIS.InputChanged,function(input)
+        if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+            local delta=input.Position-dragAt
+            frame.Position=UDim2.new(frameAt.X.Scale,frameAt.X.Offset+delta.X,frameAt.Y.Scale,frameAt.Y.Offset+delta.Y)
+        end
+        if slideDrag and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+            moveSlider(input.Position.X)
+        end
+    end)
+    hook(UIS.InputEnded,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            dragging=false;slideDrag=false
+        end
+    end)
+    hook(UIS.InputBegan,function(input)
+        if calibration==0 then return end
+        if input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch then return end
+        local pos=input.Position
+        if pos.X>=frame.AbsolutePosition.X and pos.X<=frame.AbsolutePosition.X+frame.AbsoluteSize.X
+            and pos.Y>=frame.AbsolutePosition.Y and pos.Y<=frame.AbsolutePosition.Y+frame.AbsoluteSize.Y then return end
+        local camera=workspace.CurrentCamera
+        if not camera then return end
+        settings.laneXs[calibration]=math.clamp(pos.X/camera.ViewportSize.X,0,1)
+        calibration+=1
+        if calibration>#KEYS then calibration=0;lastEvent='Calibração concluída: '..#KEYS..' teclas'
+        else lastEvent='Clique no centro do receptor '..KEYS[calibration] end
+    end)
+    setLine(settings.lineY)
+    local function matchingName(instance)
+        local name=instance.Name:lower()
+        local parent=instance.Parent and instance.Parent.Name:lower() or ''
+        -- Avoid treating arbitrary decorations as notes. Exact game-specific names may need adding here.
+        if settings.expanded and (name:find('circle',1,true) or name:find('gem',1,true) or name:find('disc',1,true) or name:find('tap',1,true)) then
+            return true
+        end
+        return name:find('note',1,true) or name:find('sustain',1,true)
+            or name:find('hold',1,true) or name:find('arrow',1,true)
+            or name:find('hitobject',1,true) or parent:find('notes',1,true)
+    end
+    local function sustainName(instance)
+        local name=instance.Name:lower()
+        return name:find('hold',1,true) or name:find('long',1,true)
+            or name:find('sustain',1,true) or name:find('trail',1,true)
+    end
+    local function findLane(x,viewWidth)
+        local best,dist
+        for i=1,#KEYS do
+            local delta=math.abs(x/viewWidth-settings.laneXs[i])
+            if not dist or delta<dist then best=i;dist=delta end
+        end
+        -- Perspective makes top-end x vary. Lane chosen near hit line only.
+        if dist and dist<=.115 then return best end
+    end
+    local function register(object,midX,headY,tailY,screenWidth,now,source)
+        local data=trackData[object]
+        if not data then
+            trackData[object]={oldY=headY,oldT=now,velocity=0,triggered=false,
+                lastSeen=now,tailY=tailY,source=source}
+            return
+        end
+        local previousY=data.oldY
+        local elapsed=math.max(now-data.oldT,.001)
+        local instant=(headY-previousY)/elapsed
+        data.velocity=data.velocity*.3+instant*.7
+        data.oldY=headY;data.oldT=now;data.lastSeen=now;data.tailY=tailY
+        if data.triggered or data.velocity<settings.minSpeed then return end
+        local cam=workspace.CurrentCamera
+        if not cam then return end
+        local lineY=cam.ViewportSize.Y*settings.lineY
+        -- Positive timing brings the trigger forward; negative timing delays it.
+        local target=lineY-data.velocity*settings.timingMs/1000
+        local lane=findLane(midX,screenWidth)
+        if not lane then return end
+        local crossing=previousY<target+settings.tolerance and headY>=target-settings.tolerance
+        local close=math.abs(headY-target)<=settings.tolerance
+        if not crossing and not close then return end
+        data.triggered=true
+        -- Avoid holding one lane for two different notes at once.
+        if held[lane] then
+            sendUp(lane);held[lane]=nil
+        end
+        if sendDown(lane) then
+            hits+=1
+            local hold=sustainName(object) or (tailY~=nil and (headY-tailY)>65)
+            held[lane]={obj=object,untilTime=now+settings.pressMs/1000,
+                hold=hold,startTime=now}
+            currentSource=source
+            lastEvent=KEYS[lane]..(hold and ' HOLD' or ' TAP')..' ['..source..']'
+        else
+            dropped+=1
+        end
+    end
+    -- Indexed note candidates: scan complete hierarchies only once, then listen for additions/removals.
+    -- The detector keeps its original 16 ms cadence and matching/registration algorithm.
+    local guiCandidates, worldCandidates = {}, {}
+    local guiIndex, worldIndex = {}, {}
+    local trackedPlayerGui
+    local guiAddedConn, guiRemovingConn
+    local function isGuiCandidate(obj)
+        return obj:IsA('GuiObject') and matchingName(obj)
+    end
+    local function isWorldCandidate(obj)
+        return obj:IsA('BasePart') and matchingName(obj)
+    end
+    local function indexCandidate(obj, list, lookup, predicate)
+        if not lookup[obj] and predicate(obj) then
+            list[#list+1] = obj
+            lookup[obj] = #list
+        end
+    end
+    local function forgetCandidate(obj, list, lookup)
+        local at = lookup[obj]
+        if not at then return end
+        local last = list[#list]
+        list[at] = last
+        if last then lookup[last] = at end
+        list[#list] = nil
+        lookup[obj] = nil
+        trackData[obj] = nil
+    end
+    local function rebuildCandidates()
+        table.clear(guiCandidates);table.clear(worldCandidates)
+        table.clear(guiIndex);table.clear(worldIndex)
+        local pg=LP:FindFirstChildOfClass('PlayerGui')
+        if pg then
+            for _,obj in ipairs(pg:GetDescendants()) do
+                indexCandidate(obj, guiCandidates, guiIndex, isGuiCandidate)
+            end
+        end
+        for _,obj in ipairs(workspace:GetDescendants()) do
+            indexCandidate(obj, worldCandidates, worldIndex, isWorldCandidate)
+        end
+    end
+    local function attachPlayerGui(pg)
+        if guiAddedConn then guiAddedConn:Disconnect();guiAddedConn=nil end
+        if guiRemovingConn then guiRemovingConn:Disconnect();guiRemovingConn=nil end
+        trackedPlayerGui=pg
+        table.clear(guiCandidates);table.clear(guiIndex)
+        if not pg then return end
+        for _,obj in ipairs(pg:GetDescendants()) do
+            indexCandidate(obj,guiCandidates,guiIndex,isGuiCandidate)
+        end
+        guiAddedConn=pg.DescendantAdded:Connect(function(obj)
+            if alive then indexCandidate(obj,guiCandidates,guiIndex,isGuiCandidate) end
+        end)
+        guiRemovingConn=pg.DescendantRemoving:Connect(function(obj)
+            forgetCandidate(obj,guiCandidates,guiIndex)
+        end)
+    end
+    local function scanGUI(now,view)
+        local count=0
+        local pg=trackedPlayerGui
+        if not pg or not pg.Parent then return count end
+        for i=1,#guiCandidates do
+            local obj=guiCandidates[i]
+            if obj and obj:IsDescendantOf(pg) and obj.Visible then
+                local p,s=obj.AbsolutePosition,obj.AbsoluteSize
+                if s.X>=7 and s.Y>=7 and s.X<500 and s.Y<view.Y then
+                    count+=1
+                    register(obj,p.X+s.X/2,p.Y+s.Y*.88,p.Y,view.X,now,'GUI')
+                end
+            end
+        end
+        return count
+    end
+    local function scanWorld(now,view)
+        local count=0
+        local camera=workspace.CurrentCamera
+        if not camera then return 0 end
+        for i=1,#worldCandidates do
+            local obj=worldCandidates[i]
+            if obj and obj:IsDescendantOf(workspace) then
+                local point,onScreen=camera:WorldToViewportPoint(obj.Position)
+                if onScreen and point.Z>0 and point.Y>-60 and point.Y<view.Y+100 then
+                    count+=1
+                    local tailY
+                    if sustainName(obj) then
+                        local top=camera:WorldToViewportPoint(obj.Position+obj.CFrame.UpVector*obj.Size.Y*.5)
+                        tailY=math.min(point.Y,top.Y)
+                    end
+                    register(obj,point.X,point.Y,tailY,view.X,now,'3D')
+                end
+            end
+        end
+        return count
+    end
+    -- Subscribe before the initial scan, avoiding missing newly spawned notes.
+    hook(workspace.DescendantAdded,function(obj)
+        if alive then indexCandidate(obj,worldCandidates,worldIndex,isWorldCandidate) end
+    end)
+    hook(workspace.DescendantRemoving,function(obj)
+        forgetCandidate(obj,worldCandidates,worldIndex)
+    end)
+    hook(LP.ChildAdded,function(obj)
+        if obj:IsA('PlayerGui') then attachPlayerGui(obj) end
+    end)
+    attachPlayerGui(LP:FindFirstChildOfClass('PlayerGui'))
+    for _,obj in ipairs(workspace:GetDescendants()) do
+        indexCandidate(obj,worldCandidates,worldIndex,isWorldCandidate)
+    end
+    -- Expanded name matching changes the cached candidate set.
+    refreshIndex=function()
+        rebuildCandidates()
+        lastEvent='Índice de notas atualizado'
+    end
+    local function serviceHeld(now,hitY)
+        for lane,data in pairs(held) do
+            if not data.hold then
+                if now>=data.untilTime then sendUp(lane);held[lane]=nil end
+            else
+                local obj= data.obj
+                local note=trackData[obj]
+                -- Only release after the trailing edge has passed the hit line.
+                -- If an object disappears while holding, release after a short fallback.
+                if not note or now-note.lastSeen>.4 or
+                    (note.tailY and note.tailY>=hitY+settings.tolerance) or
+                    now-data.startTime>8 then
+                    sendUp(lane);held[lane]=nil
+                end
+            end
+        end
+    end
+    hook(RunService.Heartbeat,function(dt)
+        if not alive then return end
+        scanClock+=dt
+        uiClock+=dt
+        local cam=workspace.CurrentCamera
+        if not cam then return end
+        local view=cam.ViewportSize
+        local hitY=view.Y*settings.lineY
+        line.Position=UDim2.fromOffset(0,hitY)
+        updateHitOverlay()
+        for i,m in ipairs(marks) do
+            if i<=#KEYS then m.Position=UDim2.fromOffset(view.X*settings.laneXs[i]-18,hitY+5) end
+        end
+        if scanClock<settings.scanInterval then return end
+        scanClock=0
+        local now=nowClock()
+        if settings.active then
+            notesSeen=0
+            if settings.gui then notesSeen+=scanGUI(now,view) end
+            if settings.world then notesSeen+=scanWorld(now,view) end
+            serviceHeld(now,hitY)
+        end
+        if uiClock<uiInterval then return end
+        uiClock=0
+        statusBadge.Text=settings.active and '● ATIVO' or '● PAUSADO'
+        statusBadge.TextColor3=settings.active and ACCENT or MUTED
+        local holdCount=0;for _ in pairs(held) do holdCount+=1 end
+        diag.Text=string.format('Detectados: %d | Enviados: %d | Holds: %d | Falhas: %d\nLinha: %.1f%% | Offset: %+d ms | Toque: %d ms\nOrigem: %s%s | Teclas: %s\nÚltimo: %s',
+            notesSeen,hits,holdCount,dropped,settings.lineY*100,settings.timingMs,settings.pressMs,
+            settings.gui and 'GUI ' or '',settings.world and '3D' or '',
+            (type(keypress)=='function' and type(keyrelease)=='function') and 'SIM' or 'NÃO',lastEvent)
+        bottom.Text=calibration>0 and ('Calibrando: clique em '..KEYS[calibration]) or ('Centros '..table.concat(KEYS,'/')..' = marcadores na linha verde')
+    end)
+    hook(GUI.Destroying,function()
+        alive=false;releaseAll()
+        if guiAddedConn then guiAddedConn:Disconnect() end
+        if guiRemovingConn then guiRemovingConn:Disconnect() end
+        for _,conn in ipairs(connections) do pcall(function() conn:Disconnect() end) end
+    end)
+
+    -- A janela e seu botão de reabertura pertencem ao mesmo script Mayck.
+    -- Fechar a janela não destrói o detector nem perde calibração.
+    local miniLauncher=Instance.new('TextButton')
+    miniLauncher.Name='ParkHeroQuickAccess'
+    miniLauncher.Size=UDim2.fromOffset(55,44)
+    miniLauncher.Position=UDim2.new(1,-70,.22,0)
+    miniLauncher.BackgroundColor3=ACCENT
+    miniLauncher.Text='♫ PH'
+    miniLauncher.Font=Enum.Font.GothamBlack
+    miniLauncher.TextSize=14
+    miniLauncher.TextColor3=BG
+    miniLauncher.BorderSizePixel=0
+    miniLauncher.Active=true
+    miniLauncher.Parent=GUI
+    Instance.new('UICorner',miniLauncher).CornerRadius=UDim.new(0,12)
+    hook(miniLauncher.MouseButton1Click,function()
+        frame.Visible=not frame.Visible
+    end)
+    -- Controle rapido: iniciar/pausar sem reabrir a janela de configuracao.
+    local quickPlay=Instance.new('TextButton')
+    quickPlay.Name='ParkHeroQuickPlay'
+    quickPlay.Size=UDim2.fromOffset(55,44)
+    quickPlay.Position=UDim2.new(1,-70,.22,50)
+    quickPlay.BackgroundColor3=Color3.fromRGB(13,162,124)
+    quickPlay.Text='▶ PH'
+    quickPlay.Font=Enum.Font.GothamBlack
+    quickPlay.TextSize=13
+    quickPlay.TextColor3=Color3.fromRGB(255,255,255)
+    quickPlay.BorderSizePixel=0
+    quickPlay.Parent=GUI
+    Instance.new('UICorner',quickPlay).CornerRadius=UDim.new(0,12)
+    local function syncQuickPlay()
+        quickPlay.Text=settings.active and 'Ⅱ PH' or '▶ PH'
+        quickPlay.BackgroundColor3=settings.active and Color3.fromRGB(183,67,92) or Color3.fromRGB(13,162,124)
+    end
+    local function quickToggle()
+        settings.active=not settings.active
+        if not settings.active then releaseAll() end
+        updateHitOverlay()
+        start.Text=settings.active and 'Ⅱ PAUSAR' or '▶ INICIAR'
+        lastEvent=settings.active and 'Auto Notes iniciado pelo atalho' or 'Auto Notes pausado pelo atalho'
+        syncQuickPlay()
+    end
+    hook(quickPlay.MouseButton1Click,quickToggle)
+    hook(RunService.Heartbeat,function()
+        if alive and quickPlay.Parent then syncQuickPlay() end
+    end)
+    local function openFloating()
+        frame.Visible=true
+        -- A janela fica longe dos receptores, liberando a parte inferior para calibrar.
+        frame.Position=UDim2.new(1,-440,0,90)
+    end
+    -- API interna com controle flutuante opcional para calibrar durante a partida.
+    return {
+        Gui = GUI,
+        OpenFloating = openFloating,
+        HideFloating = function() frame.Visible=false end,
+        ToggleOverlay = function()
+            setOverlayVisible(not settings.showLine)
+            updateOverlayButton()
+        end,
+        IsFloatingOpen = function() return frame.Visible end,
+        Start = function()
+            if not settings.active then
+                settings.active=true
+                updateHitOverlay()
+                start.Text='Ⅱ PAUSAR'
+                lastEvent='Buscando notas da partida...'
+            end
+        end,
+        Pause = function()
+            settings.active=false
+            updateHitOverlay()
+            releaseAll()
+            start.Text='▶ INICIAR'
+            lastEvent='Pausado'
+        end,
+        SetMode = function(which) selectMode(which) end,
+        Calibrate = function()
+            calibration=1
+            lastEvent='Clique no centro do receptor '..KEYS[1]
+        end,
+        LineDelta = function(d) setLine(settings.lineY+d) end,
+        TimingDelta = function(d)
+            settings.timingMs=math.clamp(settings.timingMs+d,-200,200)
+            timingLabel.Text='Offset: '..settings.timingMs..' ms'
+        end,
+        PressDelta = function(d)
+            settings.pressMs=math.clamp(settings.pressMs+d,20,250)
+            tapLabel.Text='Toque: '..settings.pressMs..' ms'
+        end,
+        CycleSource = function()
+            if settings.gui and settings.world then settings.world=false
+            elseif settings.gui then settings.gui=false;settings.world=true
+            else settings.gui=true;settings.world=true end
+        end,
+        Reset = function()
+            settings.laneXs=table.clone(MODES[mode].lanes)
+            savedLanes[mode]=table.clone(settings.laneXs)
+            setLine(.88)
+            settings.timingMs=0;settings.pressMs=65
+            trackData=setmetatable({}, {__mode='k'})
+            releaseAll()
+            lastEvent='Configurações restauradas; calibre os receptores'
+        end,
+        Status = function()
+            return {
+                active=settings.active,mode=mode,keys=table.concat(KEYS,' / '),
+                line=math.floor(settings.lineY*100+.5),timing=settings.timingMs,
+                press=settings.pressMs,hits=hits,detected=notesSeen,
+                source=(settings.gui and 'GUI ' or '')..(settings.world and '3D' or ''),
+                message=lastEvent, calibrating=calibration>0 and KEYS[calibration] or nil,
+                inputOk=type(keypress)=='function' and type(keyrelease)=='function'
+            }
+        end,
+        Shutdown = function() if GUI and GUI.Parent then GUI:Destroy() end end,
+    }
+end
+
+-- Montagem do conteúdo na sidebar do Mayck Script.
+UI.ParkPage=UI.pages.ParkHero
+UI.ParkIntro=section(UI.ParkPage,"PARK HERO • AUTO NOTES", "Escolha o modo e abra o controle flutuante para calibrar dentro da música. O detector só inicia ao pressionar INICIAR.")
+UI.ParkModes=new("Frame",{Size=UDim2.new(1,0,0,42),BackgroundTransparency=1},UI.ParkIntro)
+new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8)},UI.ParkModes)
+UI.ParkOriginal=basicButton(UI.ParkModes,"ORIGINAL • A S J K",210)
+UI.ParkOriginal.Size=UDim2.new(.5,-4,1,0)
+UI.ParkAdvanced=basicButton(UI.ParkModes,"AVANÇADO • A S J K L",210)
+UI.ParkAdvanced.Size=UDim2.new(.5,-4,1,0)
+UI.ParkFloatRow=new("Frame",{Size=UDim2.new(1,0,0,43),BackgroundTransparency=1},UI.ParkIntro)
+UI.ParkFloat=basicButton(UI.ParkFloatRow,"♫ ABRIR CONTROLE FLUTUANTE DO PARK HERO",380)
+UI.ParkFloat.Size=UDim2.new(1,0,1,0)
+UI.ParkOverlayRow=new("Frame",{Size=UDim2.new(1,0,0,38),BackgroundTransparency=1},UI.ParkIntro)
+UI.ParkOverlay=basicButton(UI.ParkOverlayRow,"◉ OCULTAR / MOSTRAR LINHA E MARCADORES  •  F8",380)
+UI.ParkOverlay.Size=UDim2.new(1,0,1,0)
+UI.ParkControls=section(UI.ParkPage,"EXECUÇÃO E CALIBRAÇÃO", "F7 inicia/pausa • F8 oculta/mostra a linha e as teclas. Calibre clicando nos centros dos receptores.")
+UI.ParkRunRow=new("Frame",{Size=UDim2.new(1,0,0,42),BackgroundTransparency=1},UI.ParkControls)
+new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8)},UI.ParkRunRow)
+UI.ParkPlay=basicButton(UI.ParkRunRow,"▶ INICIAR",200)
+UI.ParkPlay.Size=UDim2.new(.5,-4,1,0)
+UI.ParkCalibrate=basicButton(UI.ParkRunRow,"◎ CALIBRAR 5",200)
+UI.ParkCalibrate.Size=UDim2.new(.5,-4,1,0)
+UI.ParkLineRow=settingRow(UI.ParkControls,"Linha de acerto","Posição vertical dos marcadores",142)
+UI.ParkLineMinus=basicButton(UI.ParkLineRow,"−",45)
+UI.ParkLineMinus.Position=UDim2.new(1,-140,0,6)
+UI.ParkLinePlus=basicButton(UI.ParkLineRow,"+",45)
+UI.ParkLinePlus.Position=UDim2.new(1,-87,0,6)
+UI.ParkTimeRow=settingRow(UI.ParkControls,"Antecipação","Offset em passos de 5 ms",142)
+UI.ParkTimeMinus=basicButton(UI.ParkTimeRow,"−",45)
+UI.ParkTimeMinus.Position=UDim2.new(1,-140,0,6)
+UI.ParkTimePlus=basicButton(UI.ParkTimeRow,"+",45)
+UI.ParkTimePlus.Position=UDim2.new(1,-87,0,6)
+UI.ParkPressRow=settingRow(UI.ParkControls,"Toque curto","Duração dos comandos",142)
+UI.ParkPressMinus=basicButton(UI.ParkPressRow,"−",45)
+UI.ParkPressMinus.Position=UDim2.new(1,-140,0,6)
+UI.ParkPressPlus=basicButton(UI.ParkPressRow,"+",45)
+UI.ParkPressPlus.Position=UDim2.new(1,-87,0,6)
+UI.ParkMoreRow=new("Frame",{Size=UDim2.new(1,0,0,39),BackgroundTransparency=1},UI.ParkControls)
+new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8)},UI.ParkMoreRow)
+UI.ParkSource=basicButton(UI.ParkMoreRow,"FONTE: GUI + 3D",180)
+UI.ParkSource.Size=UDim2.new(.5,-4,1,0)
+UI.ParkReset=basicButton(UI.ParkMoreRow,"RESTAURAR AJUSTES",180)
+UI.ParkReset.Size=UDim2.new(.5,-4,1,0)
+UI.ParkDiagnostics=section(UI.ParkPage,"DIAGNÓSTICO AO VIVO", "Detectados e enviados não garantem que o jogo registrou os acertos.")
+UI.ParkStatus=textLabel(UI.ParkDiagnostics,"○ DESLIGADO • pronto para iniciar",12,true,"ACCENT")
+UI.ParkStatus.Size=UDim2.new(1,0,0,24)
+UI.ParkDetails=textLabel(UI.ParkDiagnostics,"O motor de notas ainda não foi carregado. Ele só será iniciado quando você utilizar a aba Park Hero.",11,false,"MUTED")
+UI.ParkDetails.Size=UDim2.new(1,0,0,80)
+UI.ParkDetails.TextWrapped=true
+UI.ParkDetails.TextYAlignment=Enum.TextYAlignment.Top
+
+-- Inicialização por demanda: abrir o Mayck Script nunca executa o motor de notas.
+-- O motor será criado somente na primeira interação com os comandos PARK HERO.
+local function ensureParkEngine()
+    if destroyed then return nil end
+    if UI.Park.engine then return UI.Park.engine end
+    UI.ParkStatus.Text="◌ Carregando motor Park Hero..."
+    local ok,result=pcall(createParkEngine)
+    if not ok or not result then
+        UI.ParkStatus.Text="● FALHA AO CARREGAR"
+        UI.ParkDetails.Text=tostring(result)
+        notify("Park Hero não iniciou: "..tostring(result),false)
+        return nil
+    end
+    UI.Park.engine=result
+    UI.ParkStatus.Text="○ PRONTO • pressione INICIAR"
+    return result
+end
+local function parkCall(method,...)
+    local engine=ensureParkEngine()
+    if not engine then return end
+    local ok,err=pcall(engine[method],...)
+    if not ok then notify("Park Hero: "..tostring(err),false) end
+end
+UI.ParkFloat.MouseButton1Click:Connect(function()
+    local engine=ensureParkEngine()
+    if not engine then return end
+    engine.OpenFloating()
+    togglePanel(false) -- libera a tela da partida; controles permanecem no flutuante
+end)
+UI.ParkOverlay.MouseButton1Click:Connect(function()parkCall("ToggleOverlay")end)
+UI.ParkOriginal.MouseButton1Click:Connect(function()parkCall("SetMode","Original")end)
+UI.ParkAdvanced.MouseButton1Click:Connect(function()parkCall("SetMode","Avancado")end)
+UI.ParkPlay.MouseButton1Click:Connect(function()
+    local engine=ensureParkEngine()
+    if not engine then return end
+    if engine.Status().active then parkCall("Pause") else parkCall("Start") end
+end)
+UI.ParkCalibrate.MouseButton1Click:Connect(function()
+    local engine=ensureParkEngine()
+    if not engine then return end
+    engine.OpenFloating()
+    parkCall("Calibrate")
+    togglePanel(false) -- evita que a janela principal cubra a pista
+    notify("Calibre A/S/J/K/L clicando nos receptores; a janela flutuante permanece acessível.",true)
+end)
+UI.ParkLineMinus.MouseButton1Click:Connect(function()parkCall("LineDelta",-.025)end)
+UI.ParkLinePlus.MouseButton1Click:Connect(function()parkCall("LineDelta",.025)end)
+UI.ParkTimeMinus.MouseButton1Click:Connect(function()parkCall("TimingDelta",-5)end)
+UI.ParkTimePlus.MouseButton1Click:Connect(function()parkCall("TimingDelta",5)end)
+UI.ParkPressMinus.MouseButton1Click:Connect(function()parkCall("PressDelta",-5)end)
+UI.ParkPressPlus.MouseButton1Click:Connect(function()parkCall("PressDelta",5)end)
+UI.ParkSource.MouseButton1Click:Connect(function()parkCall("CycleSource")end)
+UI.ParkReset.MouseButton1Click:Connect(function()parkCall("Reset")end)
+-- IMPORTANTE: não chamar createParkEngine() aqui. O painel carrega desligado.
+connect(Gui.Destroying,function()
+    if UI.Park.engine then pcall(UI.Park.engine.Shutdown) UI.Park.engine=nil end
+end)
+UI.Park.uiElapsed=0
+connect(RunService.Heartbeat,function(dt)
+    if destroyed or not UI.Park.engine then return end
+    UI.Park.uiElapsed+=dt
+    if UI.Park.uiElapsed<.3 then return end
+    UI.Park.uiElapsed=0
+    local s=UI.Park.engine.Status()
+    UI.ParkStatus.Text=(s.active and "● ATIVO" or "○ PAUSADO").."  |  "..s.keys
+    UI.ParkPlay.Text=s.active and "Ⅱ PAUSAR" or "▶ INICIAR"
+    UI.ParkCalibrate.Text="◎ CALIBRAR "..(s.mode=="Original" and "4" or "5")
+    UI.ParkOriginal.BackgroundColor3=s.mode=="Original" and C.ACCENT or C.CARD
+    UI.ParkAdvanced.BackgroundColor3=s.mode=="Avancado" and C.ACCENT or C.CARD
+    UI.ParkOriginal.TextColor3=s.mode=="Original" and C.BG or C.TEXT
+    UI.ParkAdvanced.TextColor3=s.mode=="Avancado" and C.BG or C.TEXT
+    UI.ParkSource.Text="FONTE: "..s.source
+    UI.ParkDetails.Text=string.format("Linha: %d%%   Offset: %+d ms   Toque: %d ms\nDetectados: %d   Enviados: %d   Teclas: %s\n%s%s",s.line,s.timing,s.press,s.detected,s.hits,s.inputOk and "OK" or "Indisponíveis",s.calibrating and ("Calibrar tecla "..s.calibrating.." • ") or "",s.message)
+end)
+
+-- 1. JOGADORES -------------------------------------------------------
+UI.pgPlayers =UI.pages.Jogadores
+UI.playerSection =section(UI.pgPlayers,"JOGADORES ONLINE", "Avatares, pesquisa, favoritos, TP, View e dados de cada jogador.")
+UI.espQuick =basicButton(UI.playerSection,"ATIVAR ESP • destaque dos jogadores",280)
+UI.espQuick.Size=UDim2.new(1,0,0,38)
+V4.espQuickButton=UI.espQuick
+UI.SearchBox =new("TextBox", {Size=UDim2.new(1,0,0,34),BackgroundTransparency=0,
+    PlaceholderText="Pesquisar pelo nome ou @usuário...",Text="",ClearTextOnFocus=false,
+    Font=Enum.Font.Gotham,TextSize=12,TextXAlignment=Enum.TextXAlignment.Left,
+    BorderSizePixel=0},UI.playerSection)
+bindTheme(UI.SearchBox,"TextColor3","TEXT")
+bindTheme(UI.SearchBox,"PlaceholderColor3","MUTED")
+bindTheme(UI.SearchBox,"BackgroundColor3","PANEL")
+corner(UI.SearchBox,8)
+UI.sp = new("UIPadding", {PaddingLeft=UDim.new(0,11),PaddingRight=UDim.new(0,11)},UI.SearchBox)
+UI.playerListHost =new("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,
+    BackgroundTransparency=1},UI.playerSection)
+new("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder},UI.playerListHost)
+local spectateTarget=nil
+V4.playerFavorites={}
+V4.currentInspector=nil
+V4.tpHistory={}
+V4.inspectorLabel=textLabel(UI.playerSection,"Selecione INFO para ver os dados do jogador.",11,false,"MUTED")
+V4.inspectorLabel.Size=UDim2.new(1,0,0,48)
+V4.inspectorLabel.TextWrapped=true
+local stopFreecam
+local originalCameraSubject=nil
+local function myHumanoid()
+    local ch=Me.Character
+    return ch and ch:FindFirstChildOfClass("Humanoid")
+end
+local function myRoot()
+    local ch=Me.Character
+    return ch and ch:FindFirstChild("HumanoidRootPart")
+end
+local function cameraReset()
+    local cam=Workspace.CurrentCamera
+    if cam then
+        cam.CameraType=Enum.CameraType.Custom
+        local hum=myHumanoid()
+        if hum then cam.CameraSubject=hum end
+    end
+end
+local function playerSort(a,b) return a.Name:lower()<b.Name:lower() end
+-- Avatares oficiais do Roblox; cache evita refazer pedidos a cada pesquisa.
+UI.avatarCache ={}
+UI.avatarPending ={}
+local function loadAvatar(userId,imageLabel)
+    if UI.avatarCache[userId] then imageLabel.Image=UI.avatarCache[userId] return end
+    if UI.avatarPending[userId] then
+        task.spawn(function()
+            for _=1,45 do
+                if UI.avatarCache[userId] or not UI.avatarPending[userId] then break end
+                task.wait(0.12)
+            end
+            if imageLabel.Parent and UI.avatarCache[userId] then imageLabel.Image=UI.avatarCache[userId] end
+        end)
+        return
+    end
+    UI.avatarPending[userId]=true
+    task.spawn(function()
+        local ok,content=pcall(function()
+            local url,ready=Players:GetUserThumbnailAsync(userId,
+                Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100)
+            for _=1,5 do
+                if ready or destroyed then break end
+                task.wait(0.3)
+                url,ready=Players:GetUserThumbnailAsync(userId,
+                    Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100)
+            end
+            return url
+        end)
+        if ok and type(content)=="string" and content~="" then UI.avatarCache[userId]=content end
+        UI.avatarPending[userId]=nil
+        if not destroyed and imageLabel.Parent and UI.avatarCache[userId] then
+            imageLabel.Image=UI.avatarCache[userId]
+        end
+    end)
+end
+local function refreshPlayers()
+    if destroyed then return end
+    for _,child in ipairs(UI.playerListHost:GetChildren()) do
+        if child:IsA("Frame") or (child:IsA("TextLabel") and child.Name=="MayckEmpty") then child:Destroy() end
+    end
+    local q=UI.SearchBox.Text:lower()
+    local list=Players:GetPlayers()
+    table.sort(list,playerSort)
+    local count=0
+    for _,p in ipairs(list) do
+        if p~=Me and (q=="" or p.Name:lower():find(q,1,true) or
+            p.DisplayName:lower():find(q,1,true)) then
+            count+=1
+            local row=new("Frame",{Size=UDim2.new(1,0,0,94),BorderSizePixel=0,
+                LayoutOrder=count},UI.playerListHost)
+            bindTheme(row,"BackgroundColor3","PANEL")
+            corner(row,12)
+            local avatar=new("ImageLabel",{Name="Avatar",Size=UDim2.fromOffset(52,52),
+                Position=UDim2.fromOffset(9,12),BackgroundTransparency=0,
+                BorderSizePixel=0,ScaleType=Enum.ScaleType.Crop,
+                Image="",ClipsDescendants=true},row)
+            bindTheme(avatar,"BackgroundColor3","CARD")
+            corner(avatar,28)
+            local avatarBorder=stroke(avatar,C.ACCENT,0.30)
+            avatarBorder.Thickness=1.5
+            loadAvatar(p.UserId,avatar)
+            local name=textLabel(row,(V4.playerFavorites[p.UserId] and "★ " or "")..p.DisplayName,13,true)
+            name.Position=UDim2.fromOffset(72,7)
+            name.Size=UDim2.new(1,-78,0,21)
+            local id=textLabel(row,"@"..p.Name,10,false,"MUTED")
+            id.Position=UDim2.fromOffset(72,28)
+            id.Size=UDim2.new(1,-78,0,16)
+            -- Quatro botões alinhados na segunda linha, sem sobrepor o avatar.
+            local actions=new("Frame",{Position=UDim2.fromOffset(72,54),
+                Size=UDim2.new(1,-80,0,30),BackgroundTransparency=1},row)
+            local actionLayout=new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,
+                HorizontalAlignment=Enum.HorizontalAlignment.Left,
+                VerticalAlignment=Enum.VerticalAlignment.Center,
+                Padding=UDim.new(0,4)},actions)
+            local tp=basicButton(actions,"TP",47)
+            local view=basicButton(actions,spectateTarget==p and "PARAR" or "VIEW",57)
+            local inspect=basicButton(actions,"INFO",52)
+            local fav=basicButton(actions,V4.playerFavorites[p.UserId] and "★" or "☆",41)
+            for _,b in ipairs({tp,view,inspect,fav}) do
+                b.Size=UDim2.new(.25,-3,0,27)
+                b.TextSize=10
+            end
+            inspect.MouseButton1Click:Connect(function()
+                V4.currentInspector=p
+                local r=myRoot()
+                local tr=p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                local h=p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+                V4.inspectorLabel.Text=string.format("%s (@%s)  |  ID %d  |  %s  |  Vida %s  |  Dist %s",
+                    p.DisplayName,p.Name,p.UserId,p.Team and p.Team.Name or "Sem equipe",
+                    h and math.floor(h.Health).."/"..math.floor(h.MaxHealth) or "--",
+                    r and tr and math.floor((r.Position-tr.Position).Magnitude).." studs" or "--")
+            end)
+            fav.MouseButton1Click:Connect(function()
+                V4.playerFavorites[p.UserId]=not V4.playerFavorites[p.UserId]
+                refreshPlayers()
+            end)
+            tp.MouseButton1Click:Connect(function()
+                local r=myRoot()
+                local target=p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                if r and target then
+                    -- Teleporte cliente: depende das regras e validações do servidor.
+                    table.insert(V4.tpHistory,1,r.CFrame)
+                    if #V4.tpHistory>12 then table.remove(V4.tpHistory) end
+                    r.CFrame=target.CFrame*CFrame.new(0,2,4)
+                    notify("TP solicitado: "..p.DisplayName,true)
+                else notify("Personagem indisponível.",false) end
+            end)
+            view.MouseButton1Click:Connect(function()
+                if settings.Freecam then
+                    settings.Freecam=false
+                    if stopFreecam then stopFreecam() end
+                    if toggles.Freecam then toggles.Freecam.paint() end
+                end
+                if spectateTarget==p then
+                    spectateTarget=nil
+                    cameraReset()
+                else
+                    spectateTarget=p
+                    local cam=Workspace.CurrentCamera
+                    local hum=p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+                    if cam and hum then cam.CameraType=Enum.CameraType.Custom cam.CameraSubject=hum end
+                end
+                refreshPlayers()
+            end)
+        end
+    end
+    if count==0 then
+        local none=textLabel(UI.playerListHost,"Nenhum jogador encontrado.",12,false,"MUTED")
+        none.Name="MayckEmpty"
+        none.Size=UDim2.new(1,0,0,36)
+        -- TextLabel é removido junto ao host quando o painel é destruído.
+    end
+end
+UI.SearchBox:GetPropertyChangedSignal("Text"):Connect(refreshPlayers)
+
+-- Configurações de ESP ficam abaixo dos cartões de jogadores.
+UI.espSection =section(UI.pgPlayers,"ESP / RASTREAMENTO", "Destaques locais de personagens, nome, barra de vida e linhas opcionais.")
+toggle(UI.espSection,"ESP","ESP geral","Exibe os destaques de outros jogadores")
+V4.espStatus=textLabel(UI.espSection,"ESP desligado. Ative ESP geral e ajuste Box/Skeleton na aba Visual.",11,false,"MUTED")
+V4.espStatus.Size=UDim2.new(1,0,0,39)
+V4.espStatus.TextWrapped=true
+V4.espRefreshBtn=basicButton(UI.espSection,"RECONSTRUIR ESP",225)
+V4.espRefreshBtn.Size=UDim2.new(1,0,0,37)
+toggle(UI.espSection,"ESPName","Nome do jogador","Exibe o nome acima do personagem")
+toggle(UI.espSection,"ESPDistance","Distância em studs","Mostra nome de usuário e distância")
+toggle(UI.espSection,"ESPHealth","Barra de vida","Mostra vida atual e barra")
+toggle(UI.espSection,"ESPTeamFilter","Ignorar minha equipe","Oculta destaques de jogadores do seu time")
+toggle(UI.espSection,"ESPLines","Linhas ESP","Liga sua posição ao alvo")
+slider(UI.espSection,"MaxDistance","Alcance máximo (studs)",50,5000,50)
+
+-- 2. MOVIMENTO -------------------------------------------------------
+UI.pgMove =UI.pages.Movimento
+UI.moveSection =section(UI.pgMove,"CONTROLE DE MOVIMENTO", "Recursos locais. Servidores podem redefinir velocidade, pulo e física.")
+toggle(UI.moveSection,"Speed","Speed","Velocidade personalizada de caminhada")
+slider(UI.moveSection,"SpeedValue","Velocidade",16,500,1)
+toggle(UI.moveSection,"AutoSprint","Auto Sprint","Shift no PC • automaticamente ao andar no celular")
+slider(UI.moveSection,"SprintValue","Velocidade do sprint",18,100,1)
+toggle(UI.moveSection,"Fly","Fly","WASD / Espaço / Ctrl • celular: direcional + botões")
+slider(UI.moveSection,"FlySpeed","Velocidade de voo",15,220,5)
+toggle(UI.moveSection,"InfiniteJump","Infinite Jump","Permite solicitar pulos adicionais")
+toggle(UI.moveSection,"JumpBoost","Jump Boost","Ajusta a potência do pulo no cliente")
+slider(UI.moveSection,"JumpPower","Potência do pulo",25,200,5)
+toggle(UI.moveSection,"Noclip","Noclip","Desabilita colisão local do personagem")
+toggle(UI.moveSection,"AntiVoid","Anti-Void","Retorna à última posição segura detectada")
+toggle(UI.moveSection,"SprintOnMove","Sprint sem segurar Shift","No PC, correr sempre que estiver andando")
+toggle(UI.moveSection,"FlySmooth","Fly suave","Aceleração/desaceleração gradual")
+slider(UI.moveSection,"FlyResponsiveness","Resposta do voo",2,20,1)
+toggle(UI.moveSection,"Dash","Dash rápido","Tecla Q ou botão; impulso com intervalo de segurança")
+slider(UI.moveSection,"DashStrength","Força do Dash",30,170,5)
+V4.dashBtn=basicButton(UI.moveSection,"⚡ EXECUTAR DASH",205)
+V4.dashBtn.Size=UDim2.new(1,0,0,36)
+toggle(UI.moveSection,"BunnyHop","Bunny Hop","Pula ao aterrissar enquanto se move")
+toggle(UI.moveSection,"WalkOnWater","Walk on Water experimental","Cria superfície local temporária acima da água")
+toggle(UI.moveSection,"ClickTP","Click Teleport","Clique no cenário para tentar ir até o ponto (PC)")
+UI.resetMoveBtn =basicButton(UI.moveSection,"RESTAURAR MOVIMENTO",220)
+UI.resetMoveBtn.Size=UDim2.new(1,0,0,35)
+
+-- 3. VISUAL ----------------------------------------------------------
+UI.pgVisual =UI.pages.Visual
+UI.visualSec =section(UI.pgVisual,"CÂMERA E DESTAQUES", "Personalize a experiência visual e alterne entre modos de câmera.")
+toggle(UI.visualSec,"Freecam","Freecam (PC)","WASD, Q/Ctrl; segure botão direito para girar")
+slider(UI.visualSec,"FreecamSpeed","Velocidade da Freecam",10,160,5)
+slider(UI.visualSec,"CameraFOV","Campo de visão (FOV)",50,110,1)
+UI.espColorRow =settingRow(UI.visualSec,"Paleta do ESP","Alterna a cor dos destaques",116)
+UI.espColorBtn =basicButton(UI.espColorRow,"Tema",108)
+UI.espColorBtn.Position=UDim2.new(1,-108,0.5,-17)
+UI.ESP_PALETTES ={"Tema","Rosa","Dourado","Vermelho","Custom"}
+UI.espColorBtn.MouseButton1Click:Connect(function()
+    local ix=table.find(UI.ESP_PALETTES,settings.ESPColor) or 1
+    settings.ESPColor=UI.ESP_PALETTES[ix%#UI.ESP_PALETTES+1]
+    UI.espColorBtn.Text=settings.ESPColor
+end)
+toggle(UI.visualSec,"ESPBox","ESP 3D Box","Caixa 3D opcional ao redor do personagem")
+toggle(UI.visualSec,"ESPSkeleton","Skeleton ESP","Linhas entre partes do corpo (R6/R15)")
+V4.customColorsSec=section(UI.pgVisual,"COR RGB PERSONALIZADA","Ao alterar qualquer slider, o ESP passa a utilizar sua própria cor.")
+slider(V4.customColorsSec,"ESPColorR","Vermelho",0,255,1)
+slider(V4.customColorsSec,"ESPColorG","Verde",0,255,1)
+slider(V4.customColorsSec,"ESPColorB","Azul",0,255,1)
+UI.tipView = textLabel(UI.visualSec,"Ligue ESP geral em Jogadores antes de ativar 3D Box/Skeleton. O painel mostra a quantidade de alvos no status.",11,false,"MUTED")
+UI.tipView.Size=UDim2.new(1,0,0,36)
+UI.tipView.TextWrapped=true
+
+-- RADAR 2D -----------------------------------------------------------
+V4.pgRadar=UI.pages.Radar
+V4.radarSection=section(V4.pgRadar,"RADAR 2D","Mapa simplificado: você é o ponto central, os outros jogadores são pontos.")
+toggle(V4.radarSection,"Radar","Radar ativo","Mostra um radar móvel no canto superior esquerdo")
+slider(V4.radarSection,"RadarRange","Distância do radar (studs)",50,1500,25)
+V4.radarHelp=textLabel(V4.radarSection,"O radar acompanha sua posição; não conhece paredes e usa somente dados replicados.",11,false,"MUTED")
+V4.radarHelp.Size=UDim2.new(1,0,0,39)
+V4.radarHelp.TextWrapped=true
+V4.RadarHUD=new("Frame",{Size=UDim2.fromOffset(178,190),Position=UDim2.fromOffset(14,112),
+    BackgroundTransparency=0.08,Visible=false,BorderSizePixel=0,ZIndex=40,Active=true},Gui)
+bindTheme(V4.RadarHUD,"BackgroundColor3","PANEL")
+corner(V4.RadarHUD,12)
+V4.radarBorder=stroke(V4.RadarHUD)
+bindTheme(V4.radarBorder,"Color","ACCENT")
+V4.radarHead=textLabel(V4.RadarHUD,"RADAR • MAYCK",11,true,"ACCENT")
+V4.radarHead.Position=UDim2.fromOffset(9,7)
+V4.radarHead.Size=UDim2.new(1,-18,0,20)
+V4.radarHead.ZIndex=42
+V4.radarArea=new("Frame",{Position=UDim2.fromOffset(10,29),Size=UDim2.fromOffset(158,152),
+    BorderSizePixel=0,ClipsDescendants=true,ZIndex=41},V4.RadarHUD)
+bindTheme(V4.radarArea,"BackgroundColor3","BG")
+corner(V4.radarArea,8)
+V4.radarMe=new("Frame",{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),
+    Size=UDim2.fromOffset(9,9),BorderSizePixel=0,ZIndex=45},V4.radarArea)
+bindTheme(V4.radarMe,"BackgroundColor3","GOOD")
+corner(V4.radarMe,8)
+V4.radarHead.Active=true
+dragTarget(V4.RadarHUD,V4.radarHead)
+V4.radarDots={}
+function V4.updateRadar()
+    V4.RadarHUD.Visible=settings.Radar and not destroyed
+    if not settings.Radar then return end
+    local r=myRoot()
+    if not r then return end
+    local keep={}
+    local camera=Workspace.CurrentCamera
+    local forward=camera and camera.CFrame.LookVector or Vector3.new(0,0,-1)
+    local flat=Vector3.new(forward.X,0,forward.Z)
+    if flat.Magnitude<.01 then flat=Vector3.new(0,0,-1) else flat=flat.Unit end
+    local right=Vector3.new(-flat.Z,0,flat.X)
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=Me then
+            local other=p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if other then
+                local offset=other.Position-r.Position
+                local dx=offset:Dot(right)/settings.RadarRange
+                local dy=-offset:Dot(flat)/settings.RadarRange
+                if dx*dx+dy*dy<=1 then
+                    keep[p]=true
+                    if not V4.radarDots[p] or not V4.radarDots[p].Parent then
+                        V4.radarDots[p]=new("Frame",{Size=UDim2.fromOffset(6,6),
+                            AnchorPoint=Vector2.new(.5,.5),ZIndex=44,BorderSizePixel=0},V4.radarArea)
+                        corner(V4.radarDots[p],4)
+                    end
+                    local dot=V4.radarDots[p]
+                    dot.Position=UDim2.fromScale(math.clamp(.5+dx*.46,.05,.95),math.clamp(.5+dy*.46,.05,.95))
+                    dot.BackgroundColor3=(p.Team~=nil and Me.Team~=nil and p.Team==Me.Team) and C.GOOD or C.ACCENT2
+                end
+            end
+        end
+    end
+    for p,dot in pairs(V4.radarDots) do
+        if not keep[p] then dot:Destroy() V4.radarDots[p]=nil end
+    end
+end
+
+-- 4. UTILIDADES ------------------------------------------------------
+UI.pgUtil =UI.pages.Utilidades
+UI.utilSec =section(UI.pgUtil,"FERRAMENTAS", "Opções de conforto e informação do cliente.")
+toggle(UI.utilSec,"PlayerJoinAlerts","Avisos de entrada e saída","Notificação quando outros jogadores chegam ou saem")
+toggle(UI.utilSec,"Performance","Modo desempenho","Reduz efeitos gráficos locais; restaura ao desativar")
+toggle(UI.utilSec,"AntiAFK","Anti-AFK","Tenta simular atividade após inatividade")
+UI.serverInfo =textLabel(UI.utilSec,"Servidor: carregando...",11,false,"MUTED")
+UI.serverInfo.Size=UDim2.new(1,0,0,27)
+UI.serverInfo.TextWrapped=true
+UI.rejoinBtn =basicButton(UI.utilSec,"REENTRAR NO SERVIDOR",220)
+UI.rejoinBtn.Size=UDim2.new(1,0,0,37)
+UI.disableAllBtn =basicButton(UI.utilSec,"DESATIVAR TODAS AS FUNÇÕES",250)
+UI.disableAllBtn.Size=UDim2.new(1,0,0,37)
+V4.historyBtn=basicButton(UI.utilSec,"↶ VOLTAR AO ÚLTIMO TELEPORTE",280)
+V4.historyBtn.Size=UDim2.new(1,0,0,36)
+UI.marksSec =section(UI.pgUtil,"MARCADOR DE POSIÇÃO", "Salve um ponto no mapa e retorne a ele depois. Local e sujeito às regras do servidor.")
+UI.locationLabel =textLabel(UI.marksSec,"Nenhuma posição salva.",11,false,"MUTED")
+UI.locationLabel.Size=UDim2.new(1,0,0,22)
+UI.savePositionBtn =basicButton(UI.marksSec,"SALVAR POSIÇÃO",200)
+UI.savePositionBtn.Size=UDim2.new(1,0,0,35)
+UI.returnPositionBtn =basicButton(UI.marksSec,"VOLTAR À POSIÇÃO",200)
+UI.returnPositionBtn.Size=UDim2.new(1,0,0,35)
+UI.clearPositionBtn =basicButton(UI.marksSec,"APAGAR POSIÇÃO SALVA",200)
+UI.clearPositionBtn.Size=UDim2.new(1,0,0,35)
+V4.waypointsSec=section(UI.pgUtil,"WAYPOINT MANAGER","Mantenha até 15 posições nomeadas durante esta sessão.")
+V4.waypointName=new("TextBox",{Size=UDim2.new(1,0,0,36),Text="",
+    PlaceholderText="Nome do waypoint (opcional)",ClearTextOnFocus=false,
+    Font=Enum.Font.Gotham,TextSize=12,BorderSizePixel=0},V4.waypointsSec)
+bindTheme(V4.waypointName,"TextColor3","TEXT")
+bindTheme(V4.waypointName,"PlaceholderColor3","MUTED")
+bindTheme(V4.waypointName,"BackgroundColor3","PANEL")
+corner(V4.waypointName,8)
+V4.addWaypointBtn=basicButton(V4.waypointsSec,"+ SALVAR WAYPOINT",230)
+V4.addWaypointBtn.Size=UDim2.new(1,0,0,35)
+V4.waypointHost=new("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,
+    BackgroundTransparency=1},V4.waypointsSec)
+new("UIListLayout",{Padding=UDim.new(0,6)},V4.waypointHost)
+V4.waypoints={}
+function V4.refreshWaypoints()
+    for _,child in ipairs(V4.waypointHost:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    for i,mark in ipairs(V4.waypoints) do
+        local row=new("Frame",{Size=UDim2.new(1,0,0,39),BorderSizePixel=0},V4.waypointHost)
+        bindTheme(row,"BackgroundColor3","PANEL")
+        corner(row,7)
+        local label=textLabel(row,mark.name,11,true)
+        label.Position=UDim2.fromOffset(9,8)
+        label.Size=UDim2.new(1,-153,0,22)
+        local teleportBtn=basicButton(row,"IR",56)
+        teleportBtn.Size=UDim2.fromOffset(56,29)
+        teleportBtn.Position=UDim2.new(1,-125,0,5)
+        teleportBtn.MouseButton1Click:Connect(function()
+            local r=myRoot()
+            if not r then notify("Personagem indisponível.",false) return end
+            table.insert(V4.tpHistory,1,r.CFrame)
+            if #V4.tpHistory>12 then table.remove(V4.tpHistory) end
+            r.CFrame=mark.cf*CFrame.new(0,3,0)
+            notify("Waypoint: "..mark.name,true)
+        end)
+        local deleteBtn=basicButton(row,"APAGAR",68)
+        deleteBtn.Size=UDim2.fromOffset(68,29)
+        deleteBtn.Position=UDim2.new(1,-71,0,5)
+        deleteBtn.MouseButton1Click:Connect(function()
+            local index=table.find(V4.waypoints,mark)
+            if index then table.remove(V4.waypoints,index) end
+            V4.refreshWaypoints()
+        end)
+    end
+end
+UI.cameraSection =section(UI.pgUtil,"CÂMERA E SESSÃO", "Controle rápido e informações locais.")
+UI.cameraResetBtn =basicButton(UI.cameraSection,"RESTAURAR CÂMERA",220)
+UI.cameraResetBtn.Size=UDim2.new(1,0,0,36)
+UI.sessionStatus =textLabel(UI.cameraSection,"Sessão iniciada...",11,false,"MUTED")
+UI.sessionStatus.Size=UDim2.new(1,0,0,48)
+UI.sessionStatus.TextWrapped=true
+UI.utilHelp =textLabel(UI.cameraSection,"Emergência: RightAlt desliga as funções. FPS e Ping aparecem no rodapé. Rejoin não funciona no Studio.",11,false,"MUTED")
+UI.utilHelp.Size=UDim2.new(1,0,0,44)
+UI.utilHelp.TextWrapped=true
+
+-- VOZ: status oficial e dependências externas opcionais ----------------
+V4.voiceSec=section(UI.pages.Voz,"VOICE / DISPONIBILIDADE",
+    "O Roblox gerencia permissões e suspensões de voz. O painel não pode confirmar desbloqueio de voz.")
+V4.voiceStatus=textLabel(V4.voiceSec,"Voz: ainda não verificada",12,true,"MUTED")
+V4.voiceStatus.Size=UDim2.new(1,0,0,35)
+V4.voiceStatus.TextWrapped=true
+V4.voiceCheckBtn=basicButton(V4.voiceSec,"VERIFICAR DISPONIBILIDADE",260)
+V4.voiceCheckBtn.Size=UDim2.new(1,0,0,37)
+V4.voiceAdvice=textLabel(V4.voiceSec,
+    "Se sua voz estiver suspensa, os canais oficiais do Roblox são a forma confiável de pedir revisão. "..
+    "Carregadores de terceiros não foram auditados e podem colocar sua conta ou dispositivo em risco.",
+    11,false,"MUTED")
+V4.voiceAdvice.Size=UDim2.new(1,0,0,78)
+V4.voiceAdvice.TextWrapped=true
+function V4.checkVoiceStatus()
+    V4.voiceStatus.Text="Consultando disponibilidade..."
+    task.spawn(function()
+        local ok,enabled=pcall(function()
+            return VoiceChatService:IsVoiceEnabledForUserIdAsync(Me.UserId)
+        end)
+        if destroyed or not V4.voiceStatus.Parent then return end
+        if ok then
+            V4.voiceStatus.Text=enabled and "Voz disponível para esta conta (consulta da API)." or
+                "Voz indisponível nesta conta ou sessão (consulta da API)."
+        else
+            V4.voiceStatus.Text="Consulta indisponível neste cliente. Consulte as configurações oficiais."
+        end
+    end)
+end
+V4.voiceCheckBtn.MouseButton1Click:Connect(V4.checkVoiceStatus)
+
+-- Os links abaixo são de terceiros e NÃO são executados automaticamente.
+-- Os dois passos exigem confirmação em cada botão; não há telemetria RScripts.
+-- O primeiro passo só carrega Mois7, o segundo tenta executar Sayrox85.
+-- Não é possível garantir ativação do Anti-VCB nem verificar internamente Mois7.
+UI.voiceExternal =section(UI.pages.Voz,"MÓDULOS EXTERNOS • OPCIONAIS",
+    "Fluxo manual: primeiro carregue Mois7; quando estiver pronto, tente Sayrox85.")
+UI.voiceWarn =textLabel(UI.voiceExternal,
+    "CUIDADO: ambos os links executam código remoto não auditado. Podem depender de executores "..
+    "específicos ou apresentar erros. A abertura de um loader não confirma proteção contra suspensão.",
+    11,false,"MUTED")
+UI.voiceWarn.Size=UDim2.new(1,0,0,86)
+UI.voiceWarn.TextWrapped=true
+UI.voiceStep1 =basicButton(UI.voiceExternal,"1 • INICIAR MOIS7 (EXTERNO)",260)
+UI.voiceStep1.Size=UDim2.new(1,0,0,41)
+UI.voiceStatus1 =textLabel(UI.voiceExternal,"Mois7: não solicitado",11,false,"MUTED")
+UI.voiceStatus1.Size=UDim2.new(1,0,0,43)
+UI.voiceStatus1.TextWrapped=true
+UI.voiceReadyBtn=basicButton(UI.voiceExternal,"MOIS7 JÁ ESTÁ ABERTO / PRONTO",258)
+UI.voiceReadyBtn.Size=UDim2.new(1,0,0,39)
+UI.voiceReadyStatus=textLabel(UI.voiceExternal,"Se você abriu o Mois7 por fora ou ele já apareceu, confirme aqui.",11,false,"MUTED")
+UI.voiceReadyStatus.Size=UDim2.new(1,0,0,43)
+UI.voiceReadyStatus.TextWrapped=true
+UI.voiceStep2 =basicButton(UI.voiceExternal,"2 • INICIAR SAYROX85 (EXTERNO)",260)
+UI.voiceStep2.Size=UDim2.new(1,0,0,41)
+UI.voiceStatus2 =textLabel(UI.voiceExternal,"Sayrox85: não solicitado",11,false,"MUTED")
+UI.voiceStatus2.Size=UDim2.new(1,0,0,58)
+UI.voiceStatus2.TextWrapped=true
+UI.voiceFinal =textLabel(UI.voiceExternal,
+    "Se Mois7 já estiver aberto, marque 'MOIS7 PRONTO' e clique no passo 2. "..
+    "Sem acesso ao código interno, não é possível escondê-lo e manter garantias de compatibilidade.",
+    10,false,"MUTED")
+UI.voiceFinal.Size=UDim2.new(1,0,0,77)
+UI.voiceFinal.TextWrapped=true
+UI.mois7VisibleBtn=basicButton(UI.voiceExternal,"OCULTAR JANELA MOIS7 (EXPERIMENTAL)",265)
+UI.mois7VisibleBtn.Size=UDim2.new(1,0,0,39)
+UI.mois7VisibleStatus=textLabel(UI.voiceExternal,
+    "Apenas oculta/mostra a interface encontrada; pode interromper a interação exigida pelo módulo externo.",
+    10,false,"MUTED")
+UI.mois7VisibleStatus.Size=UDim2.new(1,0,0,52)
+UI.mois7VisibleStatus.TextWrapped=true
+UI.hiddenMois7Gui=nil
+local function locateMois7Gui()
+    local locations={PlayerGui}
+    pcall(function() locations[#locations+1]=game:GetService("CoreGui") end)
+    for _,holder in ipairs(locations) do
+        local ok,found=pcall(function()
+            for _,node in ipairs(holder:GetDescendants()) do
+                if (node:IsA("TextLabel") or node:IsA("TextButton")) and
+                    type(node.Text)=="string" and
+                    node.Text:lower():find("discord.gg/mois7",1,true) then
+                    local gui=node
+                    while gui and not gui:IsA("ScreenGui") do gui=gui.Parent end
+                    if gui and gui~=Gui then return gui end
+                end
+            end
+        end)
+        if ok and found then return found end
+    end
+    return nil
+end
+UI.mois7VisibleBtn.MouseButton1Click:Connect(function()
+    if UI.hiddenMois7Gui and UI.hiddenMois7Gui.Parent then
+        pcall(function() UI.hiddenMois7Gui.Enabled=true end)
+        UI.hiddenMois7Gui=nil
+        UI.mois7VisibleBtn.Text="OCULTAR JANELA MOIS7 (EXPERIMENTAL)"
+        UI.mois7VisibleStatus.Text="Janela externa restaurada."
+        return
+    end
+    local gui=locateMois7Gui()
+    if not gui then
+        UI.mois7VisibleStatus.Text="Não encontrei a GUI Mois7 pelos textos visíveis; não alterei outras GUIs."
+        return
+    end
+    local ok,err=pcall(function() gui.Enabled=false end)
+    if ok then
+        UI.hiddenMois7Gui=gui
+        UI.mois7VisibleBtn.Text="MOSTRAR JANELA MOIS7"
+        UI.mois7VisibleStatus.Text="Interface oculta, mas funcionamento interno NÃO foi verificado."
+    else
+        UI.mois7VisibleStatus.Text="Não foi possível ocultar: "..tostring(err):sub(1,80)
+    end
+end)
+UI.voiceSources ={
+    Mois7="https://mois7.xyz/loader",
+    Sayrox85="https://raw.githubusercontent.com/Sayrox85/standalone-anti-vc-ban-roblox/refs/heads/main/Sigma%20sigma%20on%20the%20wall%20give%20me%20my%20skibidi%20bypass%20already.lua"
+}
+UI.voiceConfirm ={Mois7=false,Sayrox85=false}
+UI.voiceBusy ={Mois7=false,Sayrox85=false}
+UI.voiceLaunched ={Mois7=false,Sayrox85=false}
+UI.voiceMois7Ready=false
+UI.voiceReadyBtn.MouseButton1Click:Connect(function()
+    UI.voiceMois7Ready=not UI.voiceMois7Ready
+    UI.voiceReadyBtn.Text=UI.voiceMois7Ready and "MOIS7 CONFIRMADO • DESMARCAR" or "MOIS7 JÁ ESTÁ ABERTO / PRONTO"
+    UI.voiceReadyStatus.Text=UI.voiceMois7Ready and "Você confirmou manualmente que o painel Mois7 está pronto; isso não valida o Anti-VCB." or "Mois7 não confirmado. Abra o painel externo e confirme quando estiver pronto."
+end)
+local function launchExternal(which,button,status)
+    if destroyed or UI.voiceBusy[which] then return end
+    if UI.voiceLaunched[which] then
+        status.Text=which..": loader já solicitado nesta sessão; resultado interno não verificável."
+        return
+    end
+    -- NÃO bloquear o passo 2 com base em um loader que pode nunca retornar.
+    -- A confirmação manual de Mois7 é apenas informativa, não é prova de disponibilidade.
+    if not UI.voiceConfirm[which] then
+        UI.voiceConfirm[which]=true
+        button.Text="CONFIRMAR "..string.upper(which).." • CÓDIGO EXTERNO"
+        status.Text=(which=="Sayrox85" and not UI.voiceMois7Ready and
+            "Mois7 ainda não foi confirmado no painel. Se já está aberto, clique novamente para executar por sua conta e risco. " or "").."Clique novamente para confirmar código externo."
+        return
+    end
+    UI.voiceConfirm[which]=false
+    button.Text=which=="Mois7" and "1 • INICIAR MOIS7 (EXTERNO)" or
+        "2 • INICIAR SAYROX85 (EXTERNO)"
+    if type(loadstring)~="function" then
+        status.Text="Indisponível: LocalScripts comuns não oferecem loadstring."
+        notify("Este ambiente não permite esse carregador.",false)
+        return
+    end
+    UI.voiceBusy[which]=true
+    if which=="Mois7" then
+        UI.voiceStatus1.Text="Mois7: inicialização solicitada. Se o painel aparecer, marque PRONTO."
+    end
+    status.Text="Baixando e carregando "..which.."..."
+    task.spawn(function()
+        local ok,err=pcall(function()
+            local body=game:HttpGet(UI.voiceSources[which])
+            assert(type(body)=="string" and #body>0,"resposta vazia")
+            local f,compileError=loadstring(body)
+            assert(f,compileError or "código remoto inválido")
+            f()
+        end)
+        UI.voiceBusy[which]=false
+        if destroyed then return end
+        if ok then
+            UI.voiceLaunched[which]=true
+            status.Text=which..": o carregador retornou sem erro imediato. Recursos internos não verificados."
+            notify(which.." inicializado; confira o painel externo.",true)
+        else
+            status.Text=which..": erro: "..tostring(err):sub(1,350)
+            warn("[Mayck Script Voice] "..which.." -> "..tostring(err))
+            notify(which..": falha na inicialização.",false)
+        end
+    end)
+end
+UI.voiceStep1.MouseButton1Click:Connect(function()
+    launchExternal("Mois7",UI.voiceStep1,UI.voiceStatus1)
+end)
+UI.voiceStep2.MouseButton1Click:Connect(function()
+    launchExternal("Sayrox85",UI.voiceStep2,UI.voiceStatus2)
+end)
+
+-- 5. CONFIGURAÇÕES ---------------------------------------------------
+UI.pgConfig =UI.pages.Config
+UI.configSec =section(UI.pgConfig,"PERSONALIZAÇÃO", "Aparência e atalhos são lembrados durante esta sessão.")
+UI.themeTitle =textLabel(UI.configSec,"TEMA DE CORES",11,true,"MUTED")
+UI.themeTitle.Size=UDim2.new(1,0,0,22)
+UI.themeRow =new("Frame",{Size=UDim2.new(1,0,0,85),BackgroundTransparency=1},UI.configSec)
+UI.themeNames ={"Midnight","Emerald","Sunset","Aurora","Crimson"}
+UI.themeBtns ={}
+for i,n in ipairs(UI.themeNames) do
+    local b=basicButton(UI.themeRow,n,100)
+    local columns = i<=3 and 3 or 2
+    local column = i<=3 and (i-1) or (i-4)
+    local y = i<=3 and 0 or 45
+    b.Size=UDim2.new(1/columns,-5,0,38)
+    b.Position=UDim2.new(column/columns,0,0,y)
+    UI.themeBtns[n]=b
+end
+local function repaintThemes()
+    for n,b in pairs(UI.themeBtns) do
+        b.BackgroundColor3=n==settings.Theme and C.ACCENT or C.PANEL
+        b.TextColor3=n==settings.Theme and C.BG or C.TEXT
+    end
+    setTab(UI.currentTab)
+    for _,info in pairs(toggles) do info.paint() end
+end
+for n,b in pairs(UI.themeBtns) do
+    b.MouseButton1Click:Connect(function()
+        applyTheme(n)
+        repaintThemes()
+        notify("Tema "..n.." aplicado.",true)
+    end)
+end
+repaintThemes()
+toggle(UI.configSec,"Compact","Modo compacto","Diminui o tamanho da janela no PC")
+UI.hotkeyRow =settingRow(UI.configSec,"Atalho do painel","Alternar tecla de abertura",125)
+UI.hotkeyBtn =basicButton(UI.hotkeyRow,"E",115)
+UI.hotkeyBtn.Position=UDim2.new(1,-115,0.5,-17)
+UI.HOTKEYS ={Enum.KeyCode.E,Enum.KeyCode.RightShift,Enum.KeyCode.Insert}
+local function hotkeyLabel(k)
+    if k==Enum.KeyCode.RightShift then return "SHIFT DIR." end
+    return k.Name:upper()
+end
+UI.hotkeyBtn.MouseButton1Click:Connect(function()
+    local idx=table.find(UI.HOTKEYS,settings.Hotkey) or 1
+    settings.Hotkey=UI.HOTKEYS[idx%#UI.HOTKEYS+1]
+    UI.hotkeyBtn.Text=hotkeyLabel(settings.Hotkey)
+    notify("Novo atalho: "..UI.hotkeyBtn.Text,true)
+end)
+slider(UI.configSec,"PanelTransparency","Transparência do painel (%)",0,70,5)
+V4.dashKeyRow=settingRow(UI.configSec,"Tecla do Dash","Troca Q pelo atalho desejado",125)
+V4.dashKeyBtn=basicButton(V4.dashKeyRow,"Q",115)
+V4.dashKeyBtn.Position=UDim2.new(1,-115,0.5,-17)
+V4.DASH_KEYS={Enum.KeyCode.Q,Enum.KeyCode.F,Enum.KeyCode.G,Enum.KeyCode.X}
+V4.dashKeyBtn.MouseButton1Click:Connect(function()
+    local index=table.find(V4.DASH_KEYS,settings.DashHotkey) or 1
+    settings.DashHotkey=V4.DASH_KEYS[index%#V4.DASH_KEYS+1]
+    V4.dashKeyBtn.Text=settings.DashHotkey.Name
+end)
+V4.profilesSec=section(UI.pgConfig,"PERFIS DA SESSÃO",
+    "Salve e carregue 3 configurações temporárias. Para persistir entre sessões, integre um DataStore ao servidor do seu jogo.")
+V4.profileSlots={}
+V4.saveProfileBtns={}
+V4.loadProfileBtns={}
+for i=1,3 do
+    local row=settingRow(V4.profilesSec,"Perfil "..i,"Configurações locais",200)
+    local save=basicButton(row,"SALVAR",87)
+    save.Position=UDim2.new(1,-190,0.5,-17)
+    local load=basicButton(row,"CARREGAR",87)
+    load.Position=UDim2.new(1,-92,0.5,-17)
+    V4.saveProfileBtns[i]=save
+    V4.loadProfileBtns[i]=load
+end
+toggle(UI.configSec,"LockFloat","Travar botão M","Desligado: arraste livremente com mouse ou toque")
+V4.resetFloatBtn=basicButton(UI.configSec,"REPOSICIONAR BOTÃO M",250)
+V4.resetFloatBtn.Size=UDim2.new(1,0,0,38)
+V4.resetFloatBtn.MouseButton1Click:Connect(function()
+    local v=viewport()
+    UI.FloatButton.Position=UDim2.fromOffset(v.X-44,v.Y-58)
+    notify("Botão M reposicionado.",true)
+end)
+UI.sessionInfo =textLabel(UI.configSec,"V5.6: interface lateral adaptável, avatares oficiais e botão M móvel. Preferências valem durante esta sessão; salvamento persistente exige DataStore no servidor do seu jogo.",10,false,"MUTED")
+UI.sessionInfo.Size=UDim2.new(1,0,0,51)
+UI.sessionInfo.TextWrapped=true
+UI.sessionInfo.TextWrapped=true
+UI.destroyBtn =basicButton(UI.configSec,"DESTRUIR MAYCK SCRIPT",250)
+UI.destroyBtn.Size=UDim2.new(1,0,0,40)
+bindTheme(UI.destroyBtn,"BackgroundColor3","BAD")
+
+-- CONTROLADORES DE FUNCIONALIDADES -----------------------------------
+UI.speedSavedHumanoid =nil
+UI.speedSavedValue =nil
+UI.savedPosition =nil
+UI.sessionStartClock =os.clock()
+UI.jumpSavedHumanoid =nil
+UI.jumpSavedPower =nil
+UI.jumpSavedUsePower =nil
+UI.jumpSavedHeight =nil
+UI.flyVelocity =nil
+UI.flyAttachment =nil
+UI.flyHumanoid =nil
+UI.flyOriginalAutoRotate =nil
+UI.noclipOriginal ={}
+UI.antiVoidSaved =nil
+UI.lastVoidTime =0
+UI.flyUp =false
+UI.flyDown =false
+UI.fcPosition =nil
+UI.fcPitch =0
+UI.fcYaw =0
+UI.freecamSaved =nil
+UI.isRightMouse =false
+V4.lastDash=0
+V4.lastBunny=0
+V4.lastClickTP=0
+V4.flySmoothed=Vector3.zero
+V4.waterPlatform=nil
+V4.lastWaterScan=0
+V4.perfOriginal={}
+V4.perfLighting=nil
+
+local function sprintActive(hum)
+    if not settings.AutoSprint or settings.Speed or not hum then return false end
+    if UserInputService:GetFocusedTextBox() then return false end
+    if UserInputService.TouchEnabled or settings.SprintOnMove then
+        return hum.MoveDirection.Magnitude>0.05
+    end
+    return UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+end
+local function setSpeed()
+    local hum=myHumanoid()
+    local sprint=sprintActive(hum)
+    local shouldOverride=hum and (settings.Speed or sprint)
+    if shouldOverride then
+        if UI.speedSavedHumanoid~=hum then
+            -- Guarda a velocidade do novo Humanoid para restaurá-la depois.
+            UI.speedSavedHumanoid=hum
+            UI.speedSavedValue=hum.WalkSpeed
+        end
+        local desired=settings.Speed and settings.SpeedValue or settings.SprintValue
+        if hum.WalkSpeed~=desired then hum.WalkSpeed=desired end
+    elseif UI.speedSavedHumanoid then
+        if UI.speedSavedHumanoid.Parent then
+            UI.speedSavedHumanoid.WalkSpeed=UI.speedSavedValue or 16
+        end
+        UI.speedSavedHumanoid=nil
+        UI.speedSavedValue=nil
+    end
+end
+local function setJumpPower()
+    local h=myHumanoid()
+    if settings.JumpBoost and h then
+        if UI.jumpSavedHumanoid~=h then
+            UI.jumpSavedHumanoid=h
+            UI.jumpSavedPower=h.JumpPower
+            UI.jumpSavedUsePower=h.UseJumpPower
+            UI.jumpSavedHeight=h.JumpHeight
+        end
+        h.UseJumpPower=true
+        h.JumpPower=settings.JumpPower
+    elseif UI.jumpSavedHumanoid then
+        if UI.jumpSavedHumanoid.Parent then
+            UI.jumpSavedHumanoid.JumpPower=UI.jumpSavedPower or 50
+            UI.jumpSavedHumanoid.JumpHeight=UI.jumpSavedHeight or 7.2
+            UI.jumpSavedHumanoid.UseJumpPower=UI.jumpSavedUsePower~=false
+        end
+        UI.jumpSavedHumanoid=nil
+        UI.jumpSavedPower=nil
+        UI.jumpSavedUsePower=nil
+        UI.jumpSavedHeight=nil
+    end
+end
+local function restoreNoclip()
+    for part,original in pairs(UI.noclipOriginal) do
+        if part and part.Parent then pcall(function() part.CanCollide=original end) end
+    end
+    table.clear(UI.noclipOriginal)
+end
+local function stepNoclip()
+    if not settings.Noclip then return end
+    local ch=Me.Character
+    if not ch then return end
+    for _,d in ipairs(ch:GetDescendants()) do
+        if d:IsA("BasePart") then
+            if UI.noclipOriginal[d]==nil then UI.noclipOriginal[d]=d.CanCollide end
+            if d.CanCollide then d.CanCollide=false end
+        end
+    end
+end
+local function stopFly()
+    if UI.flyVelocity then UI.flyVelocity:Destroy() UI.flyVelocity=nil end
+    if UI.flyAttachment then UI.flyAttachment:Destroy() UI.flyAttachment=nil end
+    if UI.flyHumanoid and UI.flyHumanoid.Parent then
+        UI.flyHumanoid.AutoRotate=UI.flyOriginalAutoRotate~=nil and UI.flyOriginalAutoRotate or true
+    end
+    UI.flyHumanoid=nil
+    UI.flyOriginalAutoRotate=nil
+    UI.flyUp=false
+    UI.flyDown=false
+    V4.flySmoothed=Vector3.zero
+end
+local function startFly()
+    stopFly()
+    local hrp=myRoot()
+    local hum=myHumanoid()
+    if not hrp or not hum then return end
+    UI.flyHumanoid=hum
+    UI.flyOriginalAutoRotate=hum.AutoRotate
+    hum.AutoRotate=false
+    UI.flyAttachment=new("Attachment", {Name="Mayck_FlyAttach"},hrp)
+    UI.flyVelocity=new("LinearVelocity", {Name="Mayck_FlyVelocity",
+        Attachment0=UI.flyAttachment, MaxForce=1e9,
+        RelativeTo=Enum.ActuatorRelativeTo.World,
+        VectorVelocity=Vector3.zero},hrp)
+end
+local function flyMove(dt)
+    if not settings.Fly then return end
+    local hrp=myRoot()
+    if not hrp then return end
+    if not UI.flyVelocity or UI.flyVelocity.Parent~=hrp then startFly() end
+    if not UI.flyVelocity then return end
+    local cam=Workspace.CurrentCamera
+    if not cam then return end
+    local move=Vector3.zero
+    local hum=myHumanoid()
+    if hum then move=hum.MoveDirection end
+    if not UserInputService.TouchEnabled then
+        local forward = (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0)-
+            (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
+        local side = (UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0)-
+            (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
+        local look=cam.CFrame.LookVector
+        local right=cam.CFrame.RightVector
+        local flatLook=Vector3.new(look.X,0,look.Z)
+        local flatRight=Vector3.new(right.X,0,right.Z)
+        if flatLook.Magnitude>0 then flatLook=flatLook.Unit end
+        if flatRight.Magnitude>0 then flatRight=flatRight.Unit end
+        if forward~=0 or side~=0 then move=flatLook*forward+flatRight*side end
+    end
+    local vertical=0
+    if UI.flyUp or UserInputService:IsKeyDown(Enum.KeyCode.Space) then vertical+=1 end
+    if UI.flyDown or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or
+        UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then vertical-=1 end
+    local desired=move+Vector3.new(0,vertical,0)
+    if desired.Magnitude>1 then desired=desired.Unit end
+    local targetVelocity=desired*settings.FlySpeed
+    if settings.FlySmooth then
+        V4.flySmoothed=V4.flySmoothed:Lerp(targetVelocity,math.clamp(dt*settings.FlyResponsiveness,0,1))
+    else
+        V4.flySmoothed=targetVelocity
+    end
+    UI.flyVelocity.VectorVelocity=V4.flySmoothed
+    local flat=Vector3.new(cam.CFrame.LookVector.X,0,cam.CFrame.LookVector.Z)
+    if flat.Magnitude>0.02 then
+        hrp.CFrame=CFrame.lookAt(hrp.Position,hrp.Position+flat.Unit)
+    end
+end
+UI.MobileFly =new("Frame",{AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-15,1,-120),
+    Size=UDim2.fromOffset(85,104),BackgroundTransparency=1,Visible=false,ZIndex=25},Gui)
+UI.upBtn =basicButton(UI.MobileFly,"▲ SUBIR",82)
+UI.upBtn.Size=UDim2.fromOffset(82,45)
+UI.upBtn.Position=UDim2.fromOffset(0,0)
+UI.upBtn.ZIndex=26
+UI.downBtn =basicButton(UI.MobileFly,"▼ DESCER",82)
+UI.downBtn.Size=UDim2.fromOffset(82,45)
+UI.downBtn.Position=UDim2.fromOffset(0,55)
+UI.downBtn.ZIndex=26
+local function bindHold(btn, setter)
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then setter(true) end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then setter(false) end
+    end)
+end
+bindHold(UI.upBtn,function(v) UI.flyUp=v end)
+bindHold(UI.downBtn,function(v) UI.flyDown=v end)
+
+-- Dash, Bunny Hop, água, modo desempenho e Click Teleport
+function V4.performDash()
+    if destroyed or not settings.Dash or settings.Freecam then return end
+    if os.clock()-V4.lastDash<0.9 then return end
+    local r=myRoot()
+    local h=myHumanoid()
+    if not r or not h or h.Health<=0 then return end
+    local dir=h.MoveDirection
+    if dir.Magnitude<.05 then
+        local cam=Workspace.CurrentCamera
+        dir=cam and cam.CFrame.LookVector or r.CFrame.LookVector
+    end
+    dir=Vector3.new(dir.X,0,dir.Z)
+    if dir.Magnitude<.1 then return end
+    V4.lastDash=os.clock()
+    r.AssemblyLinearVelocity=dir.Unit*settings.DashStrength+Vector3.yAxis*math.max(0,r.AssemblyLinearVelocity.Y)
+end
+V4.dashBtn.MouseButton1Click:Connect(V4.performDash)
+function V4.stepWater()
+    if not settings.WalkOnWater then
+        if V4.waterPlatform then V4.waterPlatform:Destroy() V4.waterPlatform=nil end
+        return
+    end
+    local r=myRoot()
+    if not r then return end
+    local params=RaycastParams.new()
+    params.FilterType=Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances={Me.Character}
+    params.IgnoreWater=false
+    local hit=Workspace:Raycast(r.Position+Vector3.new(0,3,0),Vector3.new(0,-18,0),params)
+    if hit and hit.Material==Enum.Material.Water then
+        if not V4.waterPlatform then
+            V4.waterPlatform=new("Part",{Name="Mayck_WaterFooting",Size=Vector3.new(6,.5,6),
+                Anchored=true,CanCollide=true,Transparency=1},Workspace)
+        end
+        V4.waterPlatform.Position=Vector3.new(r.Position.X,hit.Position.Y-.45,r.Position.Z)
+    elseif V4.waterPlatform then
+        V4.waterPlatform:Destroy()
+        V4.waterPlatform=nil
+    end
+end
+function V4.setPerformance()
+    if settings.Performance then
+        V4.perfLighting={Shadows=Lighting.GlobalShadows}
+        Lighting.GlobalShadows=false
+        for _,desc in ipairs(Workspace:GetDescendants()) do
+            if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") then
+                -- Não mexe nos feixes próprios do ESP.
+                if not desc.Name:find("MayckESP") then
+                    V4.perfOriginal[desc]=desc.Enabled
+                    desc.Enabled=false
+                end
+            end
+        end
+    else
+        if V4.perfLighting then Lighting.GlobalShadows=V4.perfLighting.Shadows V4.perfLighting=nil end
+        for inst,value in pairs(V4.perfOriginal) do
+            if inst.Parent then pcall(function() inst.Enabled=value end) end
+        end
+        table.clear(V4.perfOriginal)
+    end
+end
+function V4.tryClickTeleport(input, processed)
+    if not settings.ClickTP or processed or destroyed or isOpen or settings.Freecam then return end
+    if not (input.UserInputType==Enum.UserInputType.MouseButton1 or
+        input.UserInputType==Enum.UserInputType.Touch) then return end
+    if os.clock()-V4.lastClickTP<.3 then return end
+    local pos=input.Position
+    local tilePos=UI.FloatButton.AbsolutePosition
+    local tileSize=UI.FloatButton.AbsoluteSize
+    if pos.X>=tilePos.X and pos.X<=tilePos.X+tileSize.X
+        and pos.Y>=tilePos.Y and pos.Y<=tilePos.Y+tileSize.Y then return end
+    local r=myRoot()
+    local camera=Workspace.CurrentCamera
+    if not r or not camera then return end
+    local hitPosition
+    if input.UserInputType==Enum.UserInputType.MouseButton1 then
+        -- GetMouse é suportado no cliente, mas só usamos a posição para um Raycast.
+        local mouse=Me:GetMouse()
+        local ray=camera:ViewportPointToRay(mouse.X,mouse.Y)
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances={Me.Character}
+        local hit=Workspace:Raycast(ray.Origin,ray.Direction*1200,params)
+        hitPosition=hit and hit.Position
+    else
+        local ray=camera:ViewportPointToRay(input.Position.X,input.Position.Y)
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances={Me.Character}
+        local hit=Workspace:Raycast(ray.Origin,ray.Direction*1200,params)
+        hitPosition=hit and hit.Position
+    end
+    if hitPosition then
+        V4.lastClickTP=os.clock()
+        table.insert(V4.tpHistory,1,r.CFrame)
+        if #V4.tpHistory>12 then table.remove(V4.tpHistory) end
+        r.CFrame=CFrame.new(hitPosition+Vector3.new(0,4,0))
+        r.AssemblyLinearVelocity=Vector3.zero
+    end
+end
+
+stopFreecam=function()
+    if UI.freecamSaved then
+        local cam=Workspace.CurrentCamera
+        if cam then
+            cam.CameraType=UI.freecamSaved.Type
+            if UI.freecamSaved.Subject and UI.freecamSaved.Subject.Parent then
+                cam.CameraSubject=UI.freecamSaved.Subject
+            else cameraReset() end
+        end
+    else cameraReset() end
+    UI.freecamSaved=nil
+    UI.fcPosition=nil
+end
+local function startFreecam()
+    local cam=Workspace.CurrentCamera
+    if not cam then return end
+    if spectateTarget then spectateTarget=nil refreshPlayers() end
+    UI.freecamSaved={Type=cam.CameraType,Subject=cam.CameraSubject}
+    UI.fcPosition=cam.CFrame.Position
+    local look=cam.CFrame.LookVector
+    UI.fcPitch=math.asin(math.clamp(look.Y,-1,1))
+    UI.fcYaw=math.atan2(-look.X,-look.Z)
+    cam.CameraType=Enum.CameraType.Scriptable
+end
+local function stepFreecam(dt)
+    if not settings.Freecam then return end
+    local cam=Workspace.CurrentCamera
+    if not cam then return end
+    if cam.CameraType~=Enum.CameraType.Scriptable then cam.CameraType=Enum.CameraType.Scriptable end
+    if not UI.fcPosition then UI.fcPosition=cam.CFrame.Position end
+    local rotation=CFrame.fromOrientation(UI.fcPitch,UI.fcYaw,0)
+    local velocity=Vector3.zero
+    local function held(k) return UserInputService:IsKeyDown(k) end
+    if held(Enum.KeyCode.W) then velocity+=rotation.LookVector end
+    if held(Enum.KeyCode.S) then velocity-=rotation.LookVector end
+    if held(Enum.KeyCode.D) then velocity+=rotation.RightVector end
+    if held(Enum.KeyCode.A) then velocity-=rotation.RightVector end
+    if held(Enum.KeyCode.Q) then velocity+=Vector3.yAxis end
+    if held(Enum.KeyCode.LeftControl) or held(Enum.KeyCode.RightControl) then velocity-=Vector3.yAxis end
+    if velocity.Magnitude>1 then velocity=velocity.Unit end
+    UI.fcPosition+=velocity*settings.FreecamSpeed*dt
+    cam.CFrame=CFrame.new(UI.fcPosition)*rotation
+end
+
+-- ESP v5.2 ------------------------------------------------------------
+-- O destaque principal (Highlight + Billboard) e independente dos efeitos opcionais.
+UI.espOrigin =nil
+UI.espOriginRoot =nil
+UI.espLastRefresh =0
+UI.espLastMessage =0
+UI.espLastStatus =0
+UI.espErrors =0
+UI.espLastError =nil
+UI.espUnready ={}
+local function safeDestroy(inst)
+    if inst then pcall(function() inst:Destroy() end) end
+end
+local function clearESPPlayer(p)
+    local obj=espObjects[p]
+    if not obj then return end
+    for _,key in ipairs({"Highlight","Billboard","Beam","TargetAttachment","Box"}) do
+        safeDestroy(obj[key])
+    end
+    if obj.Skeleton then
+        for _,item in ipairs(obj.Skeleton) do
+            safeDestroy(item.Adornment)
+            safeDestroy(item.Beam)
+        end
+    end
+    espObjects[p]=nil
+end
+local function clearESP()
+    for p in pairs(espObjects) do clearESPPlayer(p) end
+    safeDestroy(UI.espOrigin)
+    UI.espOrigin=nil
+    UI.espOriginRoot=nil
+end
+local function originAttachment()
+    local root=myRoot()
+    if not root then return nil end
+    if root~=UI.espOriginRoot or not UI.espOrigin or not UI.espOrigin.Parent then
+        safeDestroy(UI.espOrigin)
+        UI.espOrigin=new("Attachment",{Name="MayckESP_Origin"},root)
+        UI.espOriginRoot=root
+    end
+    return UI.espOrigin
+end
+local function espColors()
+    if settings.ESPColor=="Rosa" then return Color3.fromRGB(255,112,220),Color3.fromRGB(154,75,252) end
+    if settings.ESPColor=="Dourado" then return Color3.fromRGB(255,207,76),Color3.fromRGB(255,133,65) end
+    if settings.ESPColor=="Vermelho" then return Color3.fromRGB(255,91,100),Color3.fromRGB(255,154,80) end
+    if settings.ESPColor=="Custom" then
+        local custom=Color3.fromRGB(settings.ESPColorR,settings.ESPColorG,settings.ESPColorB)
+        return custom,custom:Lerp(Color3.new(1,1,1),.34)
+    end
+    return C.ACCENT,C.ACCENT2
+end
+local function reportESPError(err)
+    UI.espErrors+=1
+    UI.espLastError=tostring(err):sub(1,150)
+    warn("[Mayck Script ESP] "..UI.espLastError)
+    if os.clock()-UI.espLastMessage>5 then
+        UI.espLastMessage=os.clock()
+        notify("ESP: falha ao desenhar efeito. Consulte a saída do jogo.",false)
+    end
+end
+local function createESPModel(p,ch,root)
+    local primary,secondary=espColors()
+    local obj={Target=ch,Root=root,Skeleton={}}
+    -- Registrar imediatamente permite limpar instâncias parcialmente criadas.
+    espObjects[p]=obj
+    local hi=Instance.new("Highlight")
+    obj.Highlight=hi
+    hi.Name="MayckESP_v54_Highlight"
+    hi.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    hi.FillTransparency=0.65
+    hi.OutlineTransparency=0
+    hi.FillColor=secondary
+    hi.OutlineColor=primary
+    hi.Adornee=ch
+    hi.Parent=ch
+
+    local board=Instance.new("BillboardGui")
+    obj.Billboard=board
+    board.Name="MayckESP_v54_Billboard"
+    board.Size=UDim2.fromOffset(184,56)
+    board.Adornee=root
+    board.StudsOffsetWorldSpace=Vector3.new(0,3,0)
+    board.AlwaysOnTop=true
+    board.MaxDistance=0
+    board.LightInfluence=0
+    -- Billboard no PlayerGui evita dependência do renderizador de GUI do Character.
+    board.Parent=PlayerGui
+    local frame=new("Frame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=.15,
+        BackgroundColor3=C.BG,BorderSizePixel=0},board)
+    corner(frame,8)
+    stroke(frame,primary,.2)
+    local title=textLabel(frame,p.DisplayName,12,true)
+    title.Size=UDim2.new(1,-14,0,21)
+    title.Position=UDim2.fromOffset(7,2)
+    local sub=textLabel(frame,"",10,false,"MUTED")
+    sub.Size=UDim2.new(1,-14,0,17)
+    sub.Position=UDim2.fromOffset(7,23)
+    local back=new("Frame",{Position=UDim2.fromOffset(7,45),Size=UDim2.new(1,-14,0,6),
+        BorderSizePixel=0,BackgroundColor3=C.BORDER},frame)
+    corner(back,3)
+    local fill=new("Frame",{Size=UDim2.fromScale(1,1),BorderSizePixel=0,
+        BackgroundColor3=C.GOOD},back)
+    corner(fill,3)
+    obj.Title=title
+    obj.Sub=sub
+    obj.HealthBack=back
+    obj.HealthFill=fill
+    -- A ausência de um HRP local não impede que nomes e contornos sejam exibidos.
+    obj.TargetAttachment=nil
+    obj.Beam=nil
+    obj.Box=nil
+    return obj
+end
+local function buildESP(p)
+    if destroyed or not settings.ESP or p==Me or p.Parent~=Players then return false end
+    local ch=p.Character
+    local target=ch and ch:FindFirstChild("HumanoidRootPart")
+    if not target then
+        UI.espUnready[p]=true
+        return false
+    end
+    local old=espObjects[p]
+    if old and old.Target==ch and old.Root==target and old.Billboard and old.Billboard.Parent
+        and old.Highlight and old.Highlight.Parent then
+        return true
+    end
+    clearESPPlayer(p)
+    local ok,err=pcall(createESPModel,p,ch,target)
+    if not ok then
+        reportESPError(err)
+        clearESPPlayer(p)
+        UI.espUnready[p]=true
+        return false
+    end
+    UI.espUnready[p]=nil
+    return true
+end
+-- Efeitos opcionais independentes; não derrubam Highlight nem Billboard.
+-- Adornments funcionam em R6/R15 sem usar Drawing API do executor.
+local function ensureESPExtras(obj)
+    if settings.ESPLines and not obj.Beam then
+        local ok,err=pcall(function()
+            local origin=originAttachment()
+            if not origin then return end
+            local target=new("Attachment",{Name="MayckESP_Target"},obj.Root)
+            obj.TargetAttachment=target
+            obj.Beam=new("Beam",{Name="MayckESP_Line",Attachment0=origin,
+                Attachment1=target,FaceCamera=true,Width0=.045,Width1=.045,
+                Transparency=NumberSequence.new(.18)},obj.Root)
+        end)
+        if not ok then
+            reportESPError(err)
+            safeDestroy(obj.Beam)
+            safeDestroy(obj.TargetAttachment)
+            obj.Beam=nil
+            obj.TargetAttachment=nil
+        end
+    end
+    if settings.ESPBox and not obj.Box then
+        local ok,err=pcall(function()
+            obj.Box=new("BoxHandleAdornment",{
+                Name="MayckESP_Box",Adornee=obj.Root,AlwaysOnTop=true,
+                Size=Vector3.new(4.5,6.5,2.8),Color3=C.ACCENT,
+                Transparency=.2,Visible=false},obj.Root)
+        end)
+        if not ok then reportESPError(err) safeDestroy(obj.Box) obj.Box=nil end
+    end
+    if settings.ESPSkeleton and not obj.BonesCreated then
+        local ch=obj.Target
+        local pairsRig={
+            {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+            {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},
+            {"LeftLowerArm","LeftHand"},{"UpperTorso","RightUpperArm"},
+            {"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+            {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},
+            {"LeftLowerLeg","LeftFoot"},{"LowerTorso","RightUpperLeg"},
+            {"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"}
+        }
+        if not ch:FindFirstChild("UpperTorso") then
+            pairsRig={{"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
+                {"Torso","Left Leg"},{"Torso","Right Leg"}}
+        end
+        local available=0
+        for _,names in ipairs(pairsRig) do
+            local limbA=ch:FindFirstChild(names[1])
+            local limbB=ch:FindFirstChild(names[2])
+            if limbA and limbB and limbA:IsA("BasePart") and limbB:IsA("BasePart") then
+                local ok,err=pcall(function()
+                    local handle=new("BoxHandleAdornment",{
+                        Name="MayckESP_SkeletonBone",Adornee=obj.Root,
+                        AlwaysOnTop=true,Size=Vector3.new(.12,1,.12),
+                        Color3=C.ACCENT,Transparency=.04,Visible=false},obj.Root)
+                    table.insert(obj.Skeleton,{A=limbA,B=limbB,Adornment=handle})
+                    available+=1
+                end)
+                if not ok then reportESPError(err) end
+            end
+        end
+        obj.BonesCreated=available>0
+    end
+end
+
+-- Caixa com dimensões reais do corpo; acompanha altura e acessórios básicos.
+local function syncESPBox(obj,visible,color)
+    if not obj.Box then return end
+    obj.Box.Visible=visible and settings.ESPBox
+    if not obj.Box.Visible then return end
+    obj.Box.Color3=color
+    local boundingCF,boundingSize=obj.Target:GetBoundingBox()
+    obj.Box.Size=boundingSize+Vector3.new(.18,.18,.18)
+    obj.Box.CFrame=obj.Root.CFrame:ToObjectSpace(boundingCF)
+end
+
+-- Segmentos ficam acima das paredes e não dependem do pipeline Beam.
+local function syncESPSkeleton(obj,visible,color)
+    for _,bone in ipairs(obj.Skeleton) do
+        local box=bone.Adornment
+        if box and box.Parent then
+            local active=visible and settings.ESPSkeleton and bone.A.Parent and bone.B.Parent
+            box.Visible=not not active
+            if active then
+                local a=bone.A.Position
+                local b=bone.B.Position
+                local delta=b-a
+                local len=delta.Magnitude
+                if len>.02 then
+                    local middle=(a+b)*.5
+                    local worldCF=CFrame.lookAt(middle,b)*CFrame.Angles(math.pi/2,0,0)
+                    box.CFrame=obj.Root.CFrame:ToObjectSpace(worldCF)
+                    box.Size=Vector3.new(.13,len,.13)
+                    box.Color3=color
+                else
+                    box.Visible=false
+                end
+            end
+        end
+    end
+end
+local function forceESPRefresh()
+    for p in pairs(espObjects) do clearESPPlayer(p) end
+    UI.espLastRefresh=0
+    if settings.ESP then
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p~=Me then buildESP(p) end
+        end
+    end
+end
+local function updateESP()
+    if not settings.ESP then return end
+    if os.clock()-UI.espLastRefresh>=1 then
+        UI.espLastRefresh=os.clock()
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p~=Me then buildESP(p) end
+        end
+    end
+    local localRoot=myRoot()
+    -- Roblox limita Highlights simultâneos; prioriza os mais próximos.
+    -- Billboard e 3D Box funcionam mesmo fora das vagas de Highlight.
+    local nearest={}
+    local shown,total=0,0
+    for p,obj in pairs(espObjects) do
+        if p.Parent~=Players or p.Character~=obj.Target or not obj.Root.Parent then
+            clearESPPlayer(p)
+        else
+            total+=1
+            local distance=localRoot and (obj.Root.Position-localRoot.Position).Magnitude or 0
+            local sameTeam=Me.Team~=nil and p.Team~=nil and p.Team==Me.Team
+            local visible=distance<=settings.MaxDistance and
+                not (settings.ESPTeamFilter and sameTeam)
+            obj.Visible=visible
+            obj.Distance=distance
+            if visible then
+                shown+=1
+                nearest[#nearest+1]={Player=p,Distance=distance}
+            end
+        end
+    end
+    table.sort(nearest,function(a,b) return a.Distance<b.Distance end)
+    local highlighted={}
+    for i=1,math.min(#nearest,25) do highlighted[nearest[i].Player]=true end
+
+    for p,obj in pairs(espObjects) do
+        local ok,err=pcall(function()
+            local visible=obj.Visible
+            local distance=obj.Distance or 0
+            obj.Highlight.Enabled=visible and highlighted[p]==true
+            obj.Billboard.Enabled=visible and
+                (settings.ESPName or settings.ESPDistance or settings.ESPHealth)
+            obj.Title.Visible=settings.ESPName
+            obj.Title.Text=p.DisplayName
+            obj.Sub.Visible=settings.ESPDistance
+            obj.Sub.Text=string.format("@%s • %d studs",p.Name,math.floor(distance))
+            obj.HealthBack.Visible=settings.ESPHealth
+            local h=obj.Target:FindFirstChildOfClass("Humanoid")
+            if h then
+                local portion=math.clamp(h.Health/math.max(h.MaxHealth,1),0,1)
+                obj.HealthFill.Size=UDim2.fromScale(portion,1)
+                obj.HealthFill.BackgroundColor3=Color3.fromRGB(
+                    math.floor(255*(1-portion)),math.floor(255*portion),95)
+            else
+                obj.HealthFill.Size=UDim2.fromScale(0,1)
+            end
+            local primary,secondary=espColors()
+            obj.Highlight.FillColor=secondary
+            obj.Highlight.OutlineColor=primary
+        end)
+        if not ok then
+            reportESPError(err)
+            clearESPPlayer(p)
+        else
+            local optionalOK,optionalError=pcall(function()
+                local visible=obj.Visible
+                local primary=espColors()
+                if settings.ESPLines or settings.ESPBox or settings.ESPSkeleton then
+                    ensureESPExtras(obj)
+                end
+                if obj.Beam then
+                    obj.Beam.Color=ColorSequence.new(primary)
+                    local origin=originAttachment()
+                    if origin then obj.Beam.Attachment0=origin end
+                    obj.Beam.Enabled=visible and settings.ESPLines and origin~=nil
+                end
+                syncESPBox(obj,visible,primary)
+                syncESPSkeleton(obj,visible,primary)
+            end)
+            if not optionalOK then
+                -- Erro no efeito opcional não remove o nome/vida/Highlight.
+                reportESPError(optionalError)
+            end
+        end
+    end
+    if V4.espStatus and V4.espStatus.Parent and os.clock()-UI.espLastStatus>.35 then
+        UI.espLastStatus=os.clock()
+        V4.espStatus.Text=string.format(
+            "ESP: %d visíveis • %d preparados • %d Highlights • %d studs",
+            shown,total,math.min(#nearest,25),settings.MaxDistance)
+        if UI.espLastError and UI.espErrors>0 then
+            V4.espStatus.Text=V4.espStatus.Text.." • erros: "..UI.espErrors
+        end
+    end
+end
+local function watchPlayer(p)
+    if p==Me or watchedPlayers[p] then return end
+    watchedPlayers[p]=p.CharacterAdded:Connect(function()
+        -- O scanner reconstrói independentemente de atrasos na rede.
+        clearESPPlayer(p)
+        task.delay(.35,function()
+            if not destroyed and settings.ESP and p.Parent==Players then buildESP(p) end
+        end)
+    end)
+    if settings.ESP then buildESP(p) end
+end
+local function unwatchPlayer(p)
+    if watchedPlayers[p] then watchedPlayers[p]:Disconnect() watchedPlayers[p]=nil end
+    UI.espUnready[p]=nil
+    clearESPPlayer(p)
+    if spectateTarget==p then spectateTarget=nil cameraReset() end
+end
+for _,p in ipairs(Players:GetPlayers()) do watchPlayer(p) end
+connect(Players.PlayerAdded,function(p)
+    watchPlayer(p)
+    if settings.PlayerJoinAlerts then notify("Entrou: "..p.DisplayName,true) end
+    refreshPlayers()
+end)
+connect(Players.PlayerRemoving,function(p)
+    if settings.PlayerJoinAlerts then notify("Saiu: "..p.DisplayName,false) end
+    unwatchPlayer(p)
+    if V4.radarDots[p] then V4.radarDots[p]:Destroy() V4.radarDots[p]=nil end
+    refreshPlayers()
+end)
+refreshPlayers()
+
+-- AÇÕES DOS CONTROLES ------------------------------------------------
+featureChanged=function(key)
+    if destroyed then return end
+    if key=="ESP" then
+        if settings.ESP then
+            for _,p in ipairs(Players:GetPlayers()) do if p~=Me then buildESP(p) end end
+        else clearESP() end
+        if V4.espQuickButton then
+            V4.espQuickButton.Text=settings.ESP and "DESATIVAR ESP • ligado" or "ATIVAR ESP • destaque dos jogadores"
+        end
+        if V4.espStatus then
+            V4.espStatus.Text=settings.ESP and "ESP ligado • procurando personagens..." or "ESP desligado. Ative ESP geral e ajuste Box/Skeleton na aba Visual."
+        end
+    elseif key=="Speed" or key=="SpeedValue" or key=="AutoSprint" or key=="SprintValue" then
+        setSpeed()
+    elseif key=="JumpBoost" or key=="JumpPower" then
+        setJumpPower()
+    elseif key=="Fly" then
+        if settings.Fly then
+            if settings.Freecam then
+                settings.Freecam=false
+                stopFreecam()
+                if toggles.Freecam then toggles.Freecam.paint() end
+            end
+            startFly()
+        else stopFly() end
+        UI.MobileFly.Visible=settings.Fly and UserInputService.TouchEnabled
+    elseif key=="Noclip" then
+        if not settings.Noclip then restoreNoclip() end
+    elseif key=="Freecam" then
+        if settings.Freecam then
+            if settings.Fly then
+                settings.Fly=false
+                stopFly()
+                UI.MobileFly.Visible=false
+                if toggles.Fly then toggles.Fly.paint() end
+            end
+            startFreecam()
+            togglePanel(false)
+            notify("Freecam: botão direito + mouse, WASD, Q/Ctrl.",true)
+        else stopFreecam() end
+    elseif key=="CameraFOV" then
+        local cam=Workspace.CurrentCamera
+        if cam then cam.FieldOfView=settings.CameraFOV end
+    elseif key=="Compact" then
+        fitToScreen()
+    elseif key=="Performance" then
+        V4.setPerformance()
+    elseif key=="Radar" then
+        V4.updateRadar()
+    elseif key=="WalkOnWater" and not settings.WalkOnWater then
+        V4.stepWater()
+    elseif key=="PanelTransparency" then
+        Root.BackgroundTransparency=settings.PanelTransparency/100
+    elseif key=="ESPColorR" or key=="ESPColorG" or key=="ESPColorB" then
+        settings.ESPColor="Custom"
+        UI.espColorBtn.Text="RGB"
+    end
+end
+V4.espQuickButton.MouseButton1Click:Connect(function()
+    if destroyed then return end
+    settings.ESP=not settings.ESP
+    if toggles.ESP then toggles.ESP.paint() end
+    featureChanged("ESP")
+end)
+V4.espRefreshBtn.MouseButton1Click:Connect(function()
+    if destroyed then return end
+    if not settings.ESP then
+        notify("Ative ESP geral antes de reconstruir.",false)
+        return
+    end
+    forceESPRefresh()
+    notify("ESP reconstruído: confira quantos alvos aparecem no status.",true)
+end)
+local function resetMovement()
+    settings.Speed=false
+    settings.AutoSprint=false
+    settings.SprintOnMove=false
+    settings.Dash=false
+    settings.BunnyHop=false
+    settings.WalkOnWater=false
+    settings.ClickTP=false
+    settings.Fly=false
+    settings.Noclip=false
+    settings.InfiniteJump=false
+    settings.JumpBoost=false
+    settings.AntiVoid=false
+    settings.SpeedValue=50
+    settings.SprintValue=28
+    settings.FlySpeed=65
+    settings.FlySmooth=true
+    settings.FlyResponsiveness=9
+    settings.DashStrength=90
+    settings.JumpPower=75
+    stopFly()
+    restoreNoclip()
+    setSpeed()
+    setJumpPower()
+    UI.MobileFly.Visible=false
+    V4.stepWater()
+    for _,key in ipairs({"Speed","AutoSprint","SprintOnMove","Fly","FlySmooth","Noclip","InfiniteJump","JumpBoost","AntiVoid","Dash","BunnyHop","WalkOnWater","ClickTP"}) do
+        if toggles[key] then toggles[key].paint() end
+    end
+    if sliders.SpeedValue then sliders.SpeedValue() end
+    if sliders.SprintValue then sliders.SprintValue() end
+    if sliders.FlySpeed then sliders.FlySpeed() end
+    if sliders.JumpPower then sliders.JumpPower() end
+    if sliders.DashStrength then sliders.DashStrength() end
+    if sliders.FlyResponsiveness then sliders.FlyResponsiveness() end
+end
+UI.resetMoveBtn.MouseButton1Click:Connect(function()
+    resetMovement()
+    notify("Movimento restaurado.",true)
+end)
+local function disableAll()
+    resetMovement()
+    settings.ESP=false
+    if V4.espQuickButton then V4.espQuickButton.Text="ATIVAR ESP • destaque dos jogadores" end
+    if V4.espStatus then V4.espStatus.Text="ESP desligado. Ative ESP geral e ajuste Box/Skeleton na aba Visual." end
+    settings.ESPName=true
+    settings.ESPDistance=true
+    settings.ESPHealth=true
+    settings.ESPTeamFilter=false
+    settings.ESPLines=true
+    settings.AntiAFK=false
+    settings.Radar=false
+    settings.ESPBox=false
+    settings.ESPSkeleton=false
+    settings.Performance=false
+    V4.setPerformance()
+    V4.updateRadar()
+    settings.Freecam=false
+    stopFreecam()
+    clearESP()
+    spectateTarget=nil
+    cameraReset()
+    local currentCamera=Workspace.CurrentCamera
+    if currentCamera then currentCamera.FieldOfView=initialFOV end
+    settings.CameraFOV=initialFOV
+    if sliders.CameraFOV then sliders.CameraFOV() end
+    for _,info in pairs(toggles) do info.paint() end
+    refreshPlayers()
+    notify("Todas as funções desativadas.",true)
+end
+UI.disableAllBtn.MouseButton1Click:Connect(disableAll)
+
+-- Posição marcada: memória temporária, somente deste cliente.
+UI.savePositionBtn.MouseButton1Click:Connect(function()
+    local root=myRoot()
+    if not root then notify("Seu personagem não está disponível.",false) return end
+    UI.savedPosition=root.CFrame
+    local p=UI.savedPosition.Position
+    UI.locationLabel.Text=string.format("Salvo: X %.1f | Y %.1f | Z %.1f",p.X,p.Y,p.Z)
+    notify("Posição salva nesta sessão.",true)
+end)
+UI.returnPositionBtn.MouseButton1Click:Connect(function()
+    if not UI.savedPosition then notify("Primeiro salve uma posição.",false) return end
+    local root=myRoot()
+    if not root then notify("Seu personagem não está disponível.",false) return end
+    -- Ação local: pode ser corrigida ou bloqueada pelo jogo.
+    root.CFrame=UI.savedPosition*CFrame.new(0,3,0)
+    root.AssemblyLinearVelocity=Vector3.zero
+    notify("Retorno à posição solicitada.",true)
+end)
+UI.clearPositionBtn.MouseButton1Click:Connect(function()
+    UI.savedPosition=nil
+    UI.locationLabel.Text="Nenhuma posição salva."
+    notify("Posição apagada.",true)
+end)
+UI.cameraResetBtn.MouseButton1Click:Connect(function()
+    settings.Freecam=false
+    stopFreecam()
+    if toggles.Freecam then toggles.Freecam.paint() end
+    spectateTarget=nil
+    cameraReset()
+    refreshPlayers()
+    notify("Câmera restaurada.",true)
+end)
+UI.rejoinBtn.MouseButton1Click:Connect(function()
+    notify("Solicitando entrada no servidor...",true)
+    if RunService:IsStudio() then
+        notify("Rejoin não funciona no teste do Studio.",false)
+        return
+    end
+    local ok,err=pcall(function()
+        TeleportService:Teleport(game.PlaceId,Me)
+    end)
+    if not ok then notify("Falha no Rejoin: "..tostring(err):sub(1,80),false) end
+end)
+V4.historyBtn.MouseButton1Click:Connect(function()
+    local r=myRoot()
+    local last=table.remove(V4.tpHistory,1)
+    if not r or not last then notify("Sem teleporte anterior.",false) return end
+    r.CFrame=last*CFrame.new(0,2,0)
+    r.AssemblyLinearVelocity=Vector3.zero
+    notify("Voltou à posição anterior.",true)
+end)
+V4.addWaypointBtn.MouseButton1Click:Connect(function()
+    if #V4.waypoints>=15 then notify("Limite de 15 V4.waypoints atingido.",false) return end
+    local r=myRoot()
+    if not r then notify("Personagem indisponível.",false) return end
+    local n=V4.waypointName.Text:sub(1,38)
+    if n=="" then n="Ponto "..(#V4.waypoints+1) end
+    table.insert(V4.waypoints,{name=n,cf=r.CFrame})
+    V4.waypointName.Text=""
+    V4.refreshWaypoints()
+    notify("Waypoint salvo: "..n,true)
+end)
+for i=1,3 do
+    V4.saveProfileBtns[i].MouseButton1Click:Connect(function()
+        local snapshot={}
+        for key,value in pairs(settings) do snapshot[key]=value end
+        V4.profileSlots[i]=snapshot
+        notify("Perfil "..i.." salvo nesta sessão.",true)
+    end)
+    V4.loadProfileBtns[i].MouseButton1Click:Connect(function()
+        local snap=V4.profileSlots[i]
+        if not snap then notify("O perfil "..i.." está vazio.",false) return end
+        disableAll()
+        for key,value in pairs(snap) do settings[key]=value end
+        applyTheme(settings.Theme)
+        repaintThemes()
+        for key,redraw in pairs(sliders) do redraw() end
+        -- Liga controladores na ordem correta após restaurar configurações.
+        for _,key in ipairs({"ESP","Speed","JumpBoost","Fly","Freecam","Radar","Performance","CameraFOV","Compact","PanelTransparency"}) do
+            featureChanged(key)
+        end
+        UI.hotkeyBtn.Text=hotkeyLabel(settings.Hotkey)
+        V4.dashKeyBtn.Text=settings.DashHotkey.Name
+        notify("Perfil "..i.." carregado.",true)
+    end)
+end
+local function cleanup()
+    if destroyed then return end
+    -- The Park Hero engine owns a separate CoreGui. Shut it down BEFORE
+    -- disconnecting the main GUI events, otherwise its keys/buttons survive.
+    if UI.Park and UI.Park.engine then
+        local engine = UI.Park.engine
+        UI.Park.engine = nil
+        pcall(function() engine.Pause() end)
+        pcall(function() engine.Shutdown() end)
+    end
+    -- Defensive cleanup of an orphaned Park Hero ScreenGui from an old run.
+    local oldParkGui = game:GetService("CoreGui"):FindFirstChild("MayckParkHeroIntegratedEngine")
+    if oldParkGui then pcall(function() oldParkGui:Destroy() end) end
+    if UI.hiddenMois7Gui and UI.hiddenMois7Gui.Parent then
+        pcall(function() UI.hiddenMois7Gui.Enabled=true end)
+        UI.hiddenMois7Gui=nil
+    end
+    -- Execute desligamento enquanto as rotinas ainda podem restaurar estado.
+    disableAll()
+    destroyed=true
+    for p in pairs(watchedPlayers) do unwatchPlayer(p) end
+    clearESP()
+    if V4.waterPlatform then V4.waterPlatform:Destroy() V4.waterPlatform=nil end
+    for _,d in pairs(V4.radarDots) do if d then d:Destroy() end end
+    for _,c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+    table.clear(connections)
+    if Gui and Gui.Parent then Gui:Destroy() end
+end
+UI.destroyBtn.MouseButton1Click:Connect(cleanup)
+Gui.Destroying:Connect(function()
+    if not destroyed then cleanup() end
+end)
+
+-- ENTRADA, RESPAWN E ATUALIZAÇÃO --------------------------------------
+connect(UserInputService.InputBegan,function(input,processed)
+    if destroyed then return end
+    if input.UserInputType==Enum.UserInputType.MouseButton2 then UI.isRightMouse=true end
+    if processed or UserInputService:GetFocusedTextBox() then return end
+    if input.KeyCode==Enum.KeyCode.RightAlt then
+        disableAll()
+        return
+    end
+    if input.KeyCode==settings.Hotkey then togglePanel() return end
+    if input.KeyCode==settings.DashHotkey then V4.performDash() end
+    V4.tryClickTeleport(input,processed)
+end)
+connect(UserInputService.InputEnded,function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton2 then UI.isRightMouse=false end
+end)
+connect(UserInputService.InputChanged,function(input,processed)
+    if destroyed or not settings.Freecam then return end
+    if processed or UserInputService:GetFocusedTextBox() then return end
+    if input.UserInputType==Enum.UserInputType.MouseMovement and UI.isRightMouse then
+        UI.fcYaw-=input.Delta.X*0.003
+        UI.fcPitch=math.clamp(UI.fcPitch-input.Delta.Y*0.003,-1.5,1.5)
+    elseif input.UserInputType==Enum.UserInputType.Touch and not isOpen then
+        UI.fcYaw-=input.Delta.X*0.003
+        UI.fcPitch=math.clamp(UI.fcPitch-input.Delta.Y*0.003,-1.5,1.5)
+    end
+end)
+connect(UserInputService.JumpRequest,function()
+    if destroyed or not settings.InfiniteJump then return end
+    local h=myHumanoid()
+    if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+connect(Me.Idled,function()
+    if destroyed or not settings.AntiAFK then return end
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new(0,0))
+    end)
+end)
+connect(Me.CharacterAdded,function(char)
+    UI.antiVoidSaved=nil
+    V4.lastBunny=0
+    if V4.waterPlatform then V4.waterPlatform:Destroy() V4.waterPlatform=nil end
+    restoreNoclip()
+    stopFly()
+    if settings.Speed then
+        UI.speedSavedHumanoid=nil
+        UI.speedSavedValue=nil
+    end
+    if settings.JumpBoost then
+        UI.jumpSavedHumanoid=nil
+        UI.jumpSavedPower=nil
+        UI.jumpSavedUsePower=nil
+        UI.jumpSavedHeight=nil
+    end
+    task.spawn(function()
+        local h=char:WaitForChild("Humanoid",8)
+        local root=char:WaitForChild("HumanoidRootPart",8)
+        if destroyed or Me.Character~=char then return end
+        if h and settings.Speed then setSpeed() end
+        if h and settings.JumpBoost then setJumpPower() end
+        if root and settings.Fly then startFly() end
+        if not settings.Freecam and not spectateTarget then cameraReset() end
+        if settings.ESP then originAttachment() end
+    end)
+end)
+
+UI.elapsed =0
+UI.espElapsed =0
+UI.fpsElapsed =0
+UI.frameCount =0
+UI.previousVP =viewport()
+UI.radarElapsed =0
+connect(RunService.Heartbeat,function(dt)
+    if destroyed then return end
+    local root=myRoot()
+    local hum=myHumanoid()
+    if settings.AntiVoid and root then
+        if root.Position.Y > -15 and hum and hum.FloorMaterial~=Enum.Material.Air
+            and not settings.Fly and not settings.Noclip then
+            UI.antiVoidSaved=root.CFrame
+        end
+        if root.Position.Y < -70 and os.clock()-UI.lastVoidTime > 1.5 then
+            UI.lastVoidTime=os.clock()
+            if UI.antiVoidSaved then root.CFrame=UI.antiVoidSaved*CFrame.new(0,4,0)
+            else root.CFrame=CFrame.new(root.Position.X,20,root.Position.Z) end
+            root.AssemblyLinearVelocity=Vector3.zero
+        end
+    end
+    if settings.Speed or settings.AutoSprint or UI.speedSavedHumanoid then
+        setSpeed()
+    end
+    if settings.BunnyHop and hum and hum.Health>0 and hum.MoveDirection.Magnitude>.1
+        and hum.FloorMaterial~=Enum.Material.Air and os.clock()-V4.lastBunny>.22 then
+        V4.lastBunny=os.clock()
+        hum.Jump=true
+    end
+    if settings.WalkOnWater and os.clock()-V4.lastWaterScan>.12 then
+        V4.lastWaterScan=os.clock()
+        V4.stepWater()
+    end
+end)
+connect(RunService.Stepped,function()
+    if destroyed then return end
+    stepNoclip()
+end)
+connect(RunService.RenderStepped,function(dt)
+    if destroyed then return end
+    if settings.Fly then flyMove(dt) end
+    if settings.Freecam then stepFreecam(dt) end
+    if spectateTarget and not settings.Freecam then
+        local cam=Workspace.CurrentCamera
+        local hum=spectateTarget.Character and spectateTarget.Character:FindFirstChildOfClass("Humanoid")
+        if cam and hum and cam.CameraSubject~=hum then cam.CameraSubject=hum end
+    end
+    UI.radarElapsed+=dt
+    if UI.radarElapsed>.25 then
+        UI.radarElapsed=0
+        local ok,err=pcall(V4.updateRadar)
+        if not ok then warn("[Mayck Radar] "..tostring(err)) end
+    end
+    UI.espElapsed+=dt
+    if UI.espElapsed>0.15 then
+        UI.espElapsed=0
+        local ok,err=pcall(updateESP)
+        if not ok then warn("[Mayck ESP] Atualização: "..tostring(err)) end
+    end
+    UI.fpsElapsed+=dt
+    UI.frameCount+=1
+    if UI.fpsElapsed>=1 then
+        local fps=math.floor(UI.frameCount/UI.fpsElapsed+0.5)
+        local ping="--"
+        pcall(function() ping=tostring(math.floor(Me:GetNetworkPing()*1000+0.5)) end)
+        UI.fpsLabel.Text=string.format("FPS %d  |  PING %s ms",fps,ping)
+        UI.fpsElapsed=0
+        UI.frameCount=0
+        UI.serverInfo.Text=string.format("Jogadores: %d/%d  •  PlaceId: %s  •  Server: %s",
+            #Players:GetPlayers(),Players.MaxPlayers,tostring(game.PlaceId),
+            game.JobId~="" and game.JobId:sub(1,8).."..." or "Studio")
+        local uptime=math.floor(os.clock()-UI.sessionStartClock)
+        local myPos=myRoot()
+        local coords=myPos and string.format("X %.0f • Y %.0f • Z %.0f",
+            myPos.Position.X,myPos.Position.Y,myPos.Position.Z) or "Personagem indisponível"
+        UI.sessionStatus.Text=string.format("Sessão: %02d:%02d  |  %s",
+            math.floor(uptime/60),uptime%60,coords)
+        local v=viewport()
+        if v~=UI.previousVP then
+            UI.previousVP=v
+            fitToScreen()
+            local floatCenter=UI.FloatButton.AbsolutePosition+UI.FloatButton.AbsoluteSize/2
+            local fp=V4.clampFloatPosition(floatCenter)
+            UI.FloatButton.Position=UDim2.fromOffset(fp.X,fp.Y)
+        end
+    end
+end)
+
+local camera=Workspace.CurrentCamera
+if camera then
+    settings.CameraFOV=camera.FieldOfView
+    if sliders.CameraFOV then sliders.CameraFOV() end
+end
+notify("Mayck Script v5.4 iniciado! Use a aba Jogadores para ativar ESP.",true)
+pcall(function()
+    StarterGui:SetCore("SendNotification",{Title="Mayck Script v5.4",
+        Text="Carregado! E abre • M no celular • RightAlt emergência",Duration=4})
+end)
+-- Inicia aberto para facilitar a verificação de carregamento; depois use E ou o botão M.
+
+-- Inicialização visível: evita a impressão de que a interface não executou.
+task.defer(function() if not destroyed and Gui.Parent then togglePanel(true); notify("Mayck Script v5.4 carregado. Abra Jogadores para ligar o ESP.",true) end end)
+
